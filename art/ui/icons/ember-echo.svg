@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="miter" stroke-miterlimit="8" stroke-linecap="square">
+<circle cx="21" cy="41" r="11" fill="currentColor" fill-opacity=".3"/>
+<circle cx="21" cy="41" r="4" fill="currentColor" stroke="none"/>
+<circle cx="47" cy="17" r="6" fill="currentColor" fill-opacity=".5"/>
+<circle cx="51" cy="43" r="6" fill="currentColor" fill-opacity=".5"/>
+<path d="M30 33 L40 23 M33 42 L44 43" stroke-dasharray="3 3"/>
+</svg>

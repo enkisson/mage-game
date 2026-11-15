@@ -1,0 +1,16 @@
+{
+  "name": "gloamtide-lookdev",
+  "private": true,
+  "version": "0.0.1",
+  "description": "Look-dev scenes for Gloamtide concept art. Renders stills with three.js in headless Chromium.",
+  "type": "module",
+  "scripts": {
+    "render": "node render.cjs"
+  },
+  "dependencies": {
+    "@fontsource/barlow": "5.1.0",
+    "@fontsource/barlow-semi-condensed": "5.1.0",
+    "@fontsource/grenze-gotisch": "5.1.0",
+    "three": "0.170.0"
+  }
+}
