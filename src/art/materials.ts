@@ -49,11 +49,17 @@ function groundMaterial(): THREE.MeshStandardMaterial {
         varying vec3 vWNormal;
         vec3 gTriWeights;
         float gRock;
+        float gRipple;   // -1..1 across each wind ripple
+        float gRippleAmt; // how strongly the sand here is rippled
+        float gNear;      // 1 underfoot, 0 a little way off
         float gHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
         float gNoise(vec2 p) {
           vec2 i = floor(p), f = fract(p);
           f = f * f * (3.0 - 2.0 * f);
           return mix(mix(gHash(i), gHash(i + vec2(1.0, 0.0)), f.x), mix(gHash(i + vec2(0.0, 1.0)), gHash(i + vec2(1.0, 1.0)), f.x), f.y);
+        }
+        float phaseOf(vec2 p) {
+          return dot(p, vec2(0.5, -0.866)) * 17.0 + gNoise(p * 0.45) * 7.0 + gNoise(p * 1.9) * 1.6;
         }
         vec4 triplanar(sampler2D tex, float scale) {
           vec4 x = texture2D(tex, vWPos.zy * scale);
@@ -74,7 +80,21 @@ function groundMaterial(): THREE.MeshStandardMaterial {
           // break up tiling with a second, larger sample
           sandC = mix(sandC, texture2D(sandMap, vWPos.xz * sandScale * 0.23 + 0.37).rgb, 0.35);
           rockC = triplanar(rockMap, rockScale).rgb;
+          // grain: up close the sand is made of something
+          gNear = 1.0 - smoothstep(3.0, 13.0, distance(vWPos, cameraPosition));
+          float grain = texture2D(sandMap, vWPos.xz * sandScale * 4.7 + 0.11).g;
+          sandC *= mix(1.0, 0.72 + grain * 0.75, gNear * 0.8);
         }
+        // Wind ripples on the dry sand: crests square to the wind, wandering, in patches,
+        // gone where the tide smooths it and where the beach turns to rock.
+        float phase = phaseOf(vWPos.xz);
+        gRipple = cos(phase);
+        float patches = smoothstep(0.32, 0.62, gNoise(vWPos.xz * 0.12 + 5.3));
+        float flat_ = smoothstep(0.86, 0.97, normalize(vWNormal).y);
+        float dry = smoothstep(0.55, 1.0, vWPos.y) * (1.0 - vBlend.y);
+        gRippleAmt = patches * flat_ * dry * (1.0 - gRock) * (1.0 - smoothstep(0.0, 0.5, vBlend.z))
+          * (1.0 - smoothstep(0.7, 2.2, fwidth(phase)));
+        sandC *= 1.0 - (0.5 - 0.5 * gRipple) * 0.12 * gRippleAmt;
         vec3 groundC = mix(sandC, rockC, gRock);
         groundC *= mix(1.0, 0.55, vBlend.y);
         // damp, shaded sand where it is banked against something
@@ -98,7 +118,11 @@ function groundMaterial(): THREE.MeshStandardMaterial {
           // whiteout blend: tilt the world normal by each projection's detail
           vec3 rockN = normalize(
             vec3(0.0, nRx.y, nRx.x) * gTriWeights.x + vec3(nRy.x, 0.0, nRy.y) * gTriWeights.y + vec3(nRz.x, nRz.y, 0.0) * gTriWeights.z + wn);
-          vec3 sandN = normalize(vec3(nS.x, 0.0, nS.y) * 0.8 + wn);
+          vec3 nG = texture2D(sandNormal, vWPos.xz * sandScale * 4.7 + 0.11).xyz * 2.0 - 1.0;
+          vec3 sandTilt = vec3(nS.x, 0.0, nS.y) * 0.8 + vec3(nG.x, 0.0, nG.y) * 0.7 * gNear;
+          // each ripple leans its lee face away from the wind
+          sandTilt.xz += vec2(0.5, -0.866) * sin(phaseOf(vWPos.xz)) * 0.55 * gRippleAmt;
+          vec3 sandN = normalize(sandTilt + wn);
           vec3 worldN = normalize(mix(sandN, rockN, gRock));
           normal = normalize((viewMatrix * vec4(worldN, 0.0)).xyz);
         }`);

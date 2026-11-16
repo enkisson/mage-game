@@ -39,7 +39,10 @@ The pause menu can teach you all four words at once, for testing, and can wipe w
 
 - **The Wreck Shore.** Your ship aground on the beach at dusk, a gangway up to its deck, a ravine,
   and a cove with a low ledge and a high outcrop. The ship, rocks, debris, sand and sky are scanned
-  assets from Poly Haven.
+  assets from Poly Haven. Everything is bedded into the beach rather than set on it: sand is banked
+  along the hull and drifted round every rock, barrel and spar, objects take on sand where they
+  meet it, the dry sand is wind-rippled, the tide leaves a wrack line and foam round the sea
+  rocks, and creases are shaded where things touch (`O` turns that shading off, if it is slow).
 - **Your hands.** Fully jointed hands shape each sentence. The first word forms in your left hand,
   the second in your right; each sigil has its own sign, and each kind of spell its own cast
   gesture. The sigils you have bound are marked on the backs of your hands.
