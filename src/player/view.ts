@@ -15,7 +15,7 @@ interface ArmPose {
 // Poses for the right arm, in camera space (x right, y up, -z forward). The left arm mirrors x.
 const POSES: Record<'rest' | 'speak' | 'cast', ArmPose> = {
   rest: { wrist: new THREE.Vector3(0.3, -0.42, -0.42), axis: new THREE.Vector3(-0.12, 0.5, -0.85), palm: new THREE.Vector3(-1, 0.1, 0) },
-  speak: { wrist: new THREE.Vector3(0.2, -0.25, -0.52), axis: new THREE.Vector3(-0.22, 0.82, -0.5), palm: new THREE.Vector3(-0.85, 0, -0.5) },
+  speak: { wrist: new THREE.Vector3(0.25, -0.24, -0.54), axis: new THREE.Vector3(-0.25, 0.82, -0.5), palm: new THREE.Vector3(-0.85, 0, -0.5) },
   cast: { wrist: new THREE.Vector3(0.15, -0.2, -0.66), axis: new THREE.Vector3(-0.1, 0.86, -0.48), palm: new THREE.Vector3(0, -0.45, -0.9) },
 };
 
@@ -131,7 +131,7 @@ export class View {
       this.rig.add(arm);
       this.arms.push(arm);
     }
-    this.glow.position.set(0, -0.14, -0.55);
+    this.glow.position.set(0, -0.08, -0.6);
     this.rig.add(this.glow);
   }
 
@@ -152,7 +152,7 @@ export class View {
 
   private layoutGlyphs() {
     const live = this.glyphs.filter((g) => g.leaving < 0);
-    live.forEach((g, i) => g.home.set((i - (live.length - 1) / 2) * 0.115, -0.115, -0.6));
+    live.forEach((g, i) => g.home.set((i - (live.length - 1) / 2) * 0.125, -0.07, -0.62));
   }
 
   /** The sentence leaves the hands: thrown forward if cast, let fall if not. */
@@ -248,6 +248,6 @@ export class View {
         lit++;
       }
     }
-    this.glow.intensity += ((lit ? 0.5 + lit * 0.35 : 0) - this.glow.intensity) * Math.min(1, dt * 10);
+    this.glow.intensity += ((lit ? 0.05 + lit * 0.035 : 0) - this.glow.intensity) * Math.min(1, dt * 10);
   }
 }

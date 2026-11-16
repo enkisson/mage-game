@@ -26,6 +26,17 @@ const SCENARIOS = {
   wave: `g.debug.start(); g.debug.learnAll(); g.debug.teleport(0, -58, 0, -0.1);
     for (const [x, z] of [[-2, -64], [1, -65], [3, -63]]) g.debug.spawn('drowned', x, z);
     g.debug.advance(1.6); g.debug.say('fire', 'push'); g.debug.advance(0.22);`,
+  speak: `g.debug.start(); g.debug.learnAll(); g.debug.teleport(-2, -52, 0.1, -0.02);
+    for (const [x, z] of [[-3, -60], [1, -62], [4, -59]]) g.debug.spawn('drowned', x, z);
+    g.debug.spawn('spitter', -1, -68);
+    g.debug.advance(2.0); g.input.inject('key', 'ArrowUp'); g.debug.advance(0.25); g.input.inject('key', 'ArrowRight'); g.debug.advance(0.3);`,
+  climb: `g.debug.start(); g.debug.learnAll(); g.stands[0].phase = 'won'; g.debug.teleport(6, -66, 0.9, -0.1);
+    for (const [x, z] of [[-4, -70], [-1, -73], [-6, -66]]) g.debug.spawn('drowned', x, z);
+    g.debug.advance(1.3); g.player.pitch = -1.3; g.debug.say('stone', 'stone'); g.debug.advance(1.6);
+    g.debug.lookAt(-3, 4.6, -70); g.debug.advance(0.4);`,
+  gale: `g.debug.start(); g.debug.learnAll(); g.stands[0].phase = 'won'; g.debug.teleport(13, -83, 0, 0);
+    for (const [x, z] of [[12, -79.6], [14, -79.2], [13, -78.4]]) g.debug.spawn('drowned', x, z);
+    g.debug.advance(1.3); g.debug.lookAt(13, 11, -79); g.debug.say('wind', 'push'); g.debug.advance(0.3);`,
   journal: `g.debug.start(); g.debug.teleport(4.4, 23.6, -0.6, -0.5); g.debug.advance(0.3); g.input.inject('key', 'KeyE'); g.debug.advance(0.1);`,
 };
 

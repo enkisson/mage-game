@@ -267,6 +267,7 @@ export class Hud {
 
   showTitle(k: Knowledge, onStart: () => void) {
     const returning = k.sigils.length > 0;
+    const touch = window.matchMedia('(pointer: coarse)').matches && !window.matchMedia('(any-pointer: fine)').matches;
     this.show('title', `<div class="menu">
       <div class="logo">Gloamtide</div>
       <div class="tag">First playable · The Wreck Shore</div>
@@ -275,6 +276,7 @@ export class Hud {
       <div class="note">${returning
         ? `You remember <b>${k.sigils.length}</b> ${k.sigils.length === 1 ? 'word' : 'words'} and <b>${k.sentences.length}</b> ${k.sentences.length === 1 ? 'sentence' : 'sentences'}.`
         : 'You know no magic yet. There is a body on the sand beside you, and something in its hand.'}</div>
+      ${touch ? '<div class="note"><b>Gloamtide needs a keyboard and a trackpad or mouse.</b> Open it on a laptop or desktop to play.</div>' : ''}
     </div>`);
     (this.overlayEl.querySelector('#start') as HTMLElement).onclick = onStart;
   }
