@@ -6,6 +6,7 @@
 import * as THREE from 'three';
 import { loadGlb } from '../art/gltf';
 import { MATERIALS } from '../art/materials';
+import { refineSkinned, skinMaterial, type SkinMaterial } from './skin';
 
 export type Side = 'left' | 'right';
 
@@ -42,6 +43,13 @@ export const SHAPES = {
     thumb: [0.85, -0.05, 0.55, 0.7],
     index: [0.02, 0.04, 0.15], middle: [0.03, 0.05, 0.15], ring: [1.45, 1.7, 0], pinky: [1.5, 1.7, 0],
   },
+  /** Fingers drawn in and tense, the moment before a throw. */
+  gather: { thumb: [0.6, 0.2, 0.4, 0.5], ...all(0.9, 1.1, 0.2) },
+  /** Thumb to the first two fingertips, as if about to snap them. */
+  pinch: {
+    thumb: [0.8, 0.3, 0.35, 0.3],
+    index: [0.78, 0.9, 0.1], middle: [0.84, 0.95, 0.1], ring: [1.05, 1.25, 0.05], pinky: [1.15, 1.35, 0.05],
+  },
   /** Fingers hooked and tense, dragging something up out of the ground. */
   claw: { thumb: [0.1, 0.5, 0.45, 0.6], ...all(0.25, 1.05, 0.8) },
 } satisfies Record<string, Shape>;
@@ -61,6 +69,8 @@ export function shapeToArray(s: Shape, out: Float32Array, offset = 0) {
 const FINGERS = ['index-finger', 'middle-finger', 'ring-finger', 'pinky-finger'];
 /** How far each finger swings sideways at full fan, and which way (toward the thumb is negative). */
 const FAN = [-0.2, -0.04, 0.12, 0.27];
+/** How many points go round the arm. */
+const RING = 28;
 
 const _qx = new THREE.Quaternion();
 const _qy = new THREE.Quaternion();
@@ -83,8 +93,17 @@ export class HandRig {
   private fingers: Joint[][] = [];
   private sign: number;
   readonly mesh: THREE.SkinnedMesh;
+  /** Rest position to each nail's frame (thumb, then index to pinky), for the skin shader. */
+  readonly nails: THREE.Matrix4[] = [];
+  /** The four finger knuckles, in the hand's frame. */
+  readonly mcp: THREE.Vector3[] = [];
+  /** The open edge of the wrist, in the hand's frame: its centre and its radius round the arm. */
+  readonly wrist = { centre: new THREE.Vector3(), radius: new Float32Array(RING) };
 
-  constructor(scene: THREE.Object3D, readonly side: Side, material: THREE.Material) {
+  /**
+   * @param refine  smooth the surface and work out what the skin shader needs to know
+   */
+  constructor(scene: THREE.Object3D, readonly side: Side, material: THREE.Material, refine = false) {
     this.sign = side === 'right' ? 1 : -1;
     scene.updateMatrixWorld(true);
     const bones = new Map<string, THREE.Bone>();
@@ -95,6 +114,7 @@ export class HandRig {
     });
     if (!mesh) throw new Error('hand model has no skinned mesh');
     this.mesh = mesh as THREE.SkinnedMesh;
+    if (refine) this.mesh.geometry = refineSkinned(this.mesh.geometry, this.mesh.skeleton.bones.length, 1);
     this.mesh.material = material;
     this.mesh.frustumCulled = false;
     this.mesh.castShadow = false;
@@ -147,7 +167,103 @@ export class HandRig {
       const k = p(`${f}-phalanx-proximal`);
       this.knuckles.push(new THREE.Vector3(k.x, k.y - 0.024, k.z - 0.0125));
     }
+    for (const f of FINGERS) this.mcp.push(p(`${f}-phalanx-proximal`));
+    if (refine) this.describe(inv, p);
     this.root.traverse((o) => { o.userData.noCollide = true; });
+  }
+
+  /**
+   * Work out, for every vertex, where it sits on the hand at rest and what kind of skin is
+   * there; find the nails; and trace the open edge of the wrist for the forearm to join.
+   */
+  private describe(toHand: THREE.Matrix4, joint: (name: string) => THREE.Vector3) {
+    const geo = this.mesh.geometry;
+    const P = geo.attributes.position, N = geo.attributes.normal, SI = geo.attributes.skinIndex, SW = geo.attributes.skinWeight;
+    const m = toHand.clone().multiply(this.mesh.bindMatrix);
+    const nm = new THREE.Matrix3().getNormalMatrix(m);
+    const names = this.mesh.skeleton.bones.map((b) => b.name);
+    const thin = names.map((n) => {
+      if (n.includes('tip') || n.includes('distal')) return 1;
+      if (n.includes('intermediate')) return 0.75;
+      if (n === 'thumb-phalanx-proximal') return 0.6;
+      if (n.includes('phalanx-proximal')) return 0.5;
+      if (n === 'thumb-metacarpal') return 0.2;
+      return 0;
+    });
+    const joints: { at: THREE.Vector3; r: number }[] = [];
+    for (const f of FINGERS) {
+      joints.push({ at: joint(`${f}-phalanx-proximal`), r: 0.012 }, { at: joint(`${f}-phalanx-intermediate`), r: 0.0095 }, { at: joint(`${f}-phalanx-distal`), r: 0.008 });
+    }
+    joints.push({ at: joint('thumb-phalanx-proximal'), r: 0.011 }, { at: joint('thumb-phalanx-distal'), r: 0.009 });
+
+    const rest = new Float32Array(P.count * 3), info = new Float32Array(P.count * 4);
+    const v = new THREE.Vector3(), n = new THREE.Vector3();
+    const at: THREE.Vector3[] = [];
+    for (let i = 0; i < P.count; i++) {
+      v.fromBufferAttribute(P, i).applyMatrix4(m);
+      n.fromBufferAttribute(N, i).applyMatrix3(nm).normalize();
+      at.push(v.clone());
+      rest.set([v.x, v.y, v.z], i * 3);
+      let t = 0;
+      for (let k = 0; k < 4; k++) t += thin[SI.getComponent(i, k)] * SW.getComponent(i, k);
+      let j = 0;
+      for (const q of joints) j = Math.max(j, Math.exp(-v.distanceToSquared(q.at) / (q.r * q.r)));
+      info.set([t, j, THREE.MathUtils.clamp(0.5 - n.z * 0.9, 0, 1), 1], i * 4);
+    }
+    geo.setAttribute('rest', new THREE.BufferAttribute(rest, 3));
+    geo.setAttribute('skinA', new THREE.BufferAttribute(info, 4));
+
+    // nails: a frame on the back of each last finger joint, scaled so the nail is about a unit square
+    const palmFront = new THREE.Vector3(0, 0.06, 0.04);
+    for (const f of ['thumb', ...FINGERS]) {
+      const base = joint(`${f}-phalanx-distal`), tip = joint(`${f}-tip`);
+      const along = tip.clone().sub(base).normalize();
+      // the model's tip joint sits inside the fingertip, so measure to the end of the skin itself
+      const mine = names.map((n) => n === `${f}-phalanx-distal` || n === `${f}-tip`);
+      let len = base.distanceTo(tip);
+      for (let i = 0; i < P.count; i++) {
+        let w = 0;
+        for (let k = 0; k < 4; k++) if (mine[SI.getComponent(i, k)]) w += SW.getComponent(i, k);
+        if (w > 0.6) len = Math.max(len, at[i].clone().sub(base).dot(along));
+      }
+      const bone = this.mesh.skeleton.bones.find((b) => b.name === `${f}-phalanx-distal`)!;
+      const up = new THREE.Vector3(0, 1, 0).transformDirection(bone.matrixWorld);
+      up.addScaledVector(along, -up.dot(along)).normalize();
+      if (up.dot(base.clone().sub(palmFront)) < 0) up.negate();
+      const across = new THREE.Vector3().crossVectors(along, up);
+      const wide = f === 'thumb' ? 0.0088 : f === 'pinky-finger' ? 0.0062 : 0.0072;
+      const origin = base.clone().addScaledVector(along, len * 0.66);
+      const frame = new THREE.Matrix4().makeBasis(across.multiplyScalar(wide), up.multiplyScalar(0.004), along.multiplyScalar(-len * 0.3)).setPosition(origin);
+      this.nails.push(frame.invert());
+    }
+
+    // Where the arm joins: a ring round the wrist, a little above the end of the mesh.
+    let low = Infinity;
+    for (const q of at) low = Math.min(low, q.y);
+    const y0 = low + 0.003;
+    const band = at.filter((q) => Math.abs(q.y - (low + 0.013)) < 0.008);
+    if (band.length >= 8) {
+      const c = this.wrist.centre.set(0, 0, 0);
+      for (const q of band) c.add(q);
+      c.divideScalar(band.length);
+      c.y = y0;
+      const polar = band.map((q) => ({ a: Math.atan2(q.z - c.z, q.x - c.x), r: Math.hypot(q.x - c.x, q.z - c.z) }));
+      for (let k = 0; k < RING; k++) {
+        const a = -Math.PI + (k / RING) * Math.PI * 2;
+        // the outermost of the nearby points, weighted toward those at this angle
+        let sum = 0, weight = 0;
+        for (const q of polar) {
+          let d = Math.abs(q.a - a);
+          if (d > Math.PI) d = Math.PI * 2 - d;
+          const w = Math.exp(-((d / 0.28) ** 2));
+          sum += q.r * w; weight += w;
+        }
+        this.wrist.radius[k] = weight > 1e-6 ? sum / weight : 0.027;
+      }
+    } else {
+      this.wrist.radius.fill(0.027);
+      this.wrist.centre.set(0, -0.01, 0);
+    }
   }
 
   /** Bend the fingers into a shape given as 16 numbers (see `shapeToArray`). */
@@ -173,82 +289,225 @@ export class HandRig {
   }
 }
 
-/** Skin, tinted warmer toward the fingertips and knuckles where blood shows through. */
-export function skinMaterial(): THREE.MeshStandardMaterial {
-  return new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.58, metalness: 0, vertexColors: true });
-}
+const SKIN_TONE = 0xa67656;
 
-function tintSkin(mesh: THREE.SkinnedMesh, base: THREE.Color) {
-  const geo = mesh.geometry;
-  const index = geo.attributes.skinIndex, weight = geo.attributes.skinWeight;
-  const names = mesh.skeleton.bones.map((b) => b.name);
-  const colors = new Float32Array(index.count * 3);
-  const warm = base.clone().lerp(new THREE.Color(0xb5584a), 0.4);
-  const c = new THREE.Color();
-  for (let i = 0; i < index.count; i++) {
-    let tip = 0;
-    for (let k = 0; k < 4; k++) {
-      const n = names[index.getComponent(i, k)] ?? '';
-      const wgt = weight.getComponent(i, k);
-      if (n.includes('tip') || n.includes('distal')) tip += wgt;
-      else if (n.includes('intermediate')) tip += wgt * 0.35;
-    }
-    c.copy(base).lerp(warm, Math.min(1, tip));
-    colors[i * 3] = c.r;
-    colors[i * 3 + 1] = c.g;
-    colors[i * 3 + 2] = c.b;
-  }
-  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-}
-
-/** Load both hands. Resolves null if the model files are missing. */
-export async function loadHands(base: string, skinTone = 0xa9795a): Promise<{ left: HandRig; right: HandRig } | null> {
+/** Load both hands, smoothed and skinned. Resolves null if the model files are missing. */
+export async function loadHands(base: string, skinTone = SKIN_TONE): Promise<{ left: HandRig; right: HandRig } | null> {
   try {
     const [l, r] = await Promise.all([loadGlb(base + 'left.glb'), loadGlb(base + 'right.glb')]);
-    const material = skinMaterial();
-    const left = new HandRig(l.scene, 'left', material);
-    const right = new HandRig(r.scene, 'right', material);
-    const tone = new THREE.Color(skinTone);
-    tintSkin(left.mesh, tone);
-    tintSkin(right.mesh, tone);
-    return { left, right };
+    const make = (scene: THREE.Object3D, side: Side) => {
+      const material = skinMaterial(skinTone, side === 'right' ? 1 : -1);
+      const rig = new HandRig(scene, side, material, true);
+      material.skin.uNail.value = rig.nails;
+      material.skin.uTendon.value = rig.mcp;
+      rig.mesh.receiveShadow = true;
+      return rig;
+    };
+    return { left: make(l.scene, 'left'), right: make(r.scene, 'right') };
   } catch {
     return null;
   }
 }
 
-/** Forearm, rolled sleeve and wrist cord. Its origin is the wrist; it reaches back along -Y. */
-export function buildForearm(): THREE.Group {
-  const g = new THREE.Group();
-  const skin = new THREE.MeshStandardMaterial({ color: 0xa9795a, roughness: 0.6 });
-  // an oval limb that widens toward the elbow
-  const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.0285, 0.043, 0.3, 14, 1, true), skin);
-  arm.position.y = -0.15;
-  arm.scale.set(1, 1, 0.8);
-  g.add(arm);
-  const heel = new THREE.Mesh(new THREE.SphereGeometry(0.0285, 12, 8), skin);
-  heel.scale.set(1, 0.9, 0.8);
-  g.add(heel);
-  const cord = new THREE.Mesh(new THREE.TorusGeometry(0.0305, 0.0052, 6, 18), MATERIALS.leather);
-  cord.rotation.x = Math.PI / 2;
-  cord.position.y = -0.022;
-  cord.scale.set(1, 0.8, 1);
-  g.add(cord);
-  const cord2 = cord.clone();
-  cord2.position.y = -0.034;
-  cord2.rotation.z = 0.12;
-  g.add(cord2);
-  const roll = new THREE.Mesh(new THREE.TorusGeometry(0.047, 0.014, 7, 18), MATERIALS.linen);
-  roll.rotation.x = Math.PI / 2;
-  roll.position.y = -0.235;
-  roll.scale.set(1, 0.85, 1);
-  g.add(roll);
-  const sleeve = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.075, 0.55, 14, 1, true), MATERIALS.linen);
-  sleeve.position.y = -0.5;
-  sleeve.scale.set(1, 1, 0.85);
-  g.add(sleeve);
-  g.traverse((o) => { o.userData.noCollide = true; });
-  return g;
+/** The skin material a hand was given, if it has one. */
+export function skinOf(rig: HandRig): SkinMaterial | null {
+  const m = rig.mesh.material as SkinMaterial;
+  return m.skin ? m : null;
+}
+
+const ARM_RINGS = 18;
+const ARM_LENGTH = 0.36;
+const _q = new THREE.Quaternion();
+const _qa = new THREE.Quaternion();
+const _c = new THREE.Vector3();
+const _p = new THREE.Vector3();
+const _rest = new THREE.Vector3();
+const _ax = new THREE.Vector3();
+const _ay = new THREE.Vector3();
+const _az = new THREE.Vector3();
+const _mm = new THREE.Matrix4();
+
+/**
+ * The forearm: one surface that begins at the hand's own wrist edge, bends where the wrist
+ * bends, and takes up the turn of the palm gradually toward the elbow, as a real one does.
+ * It is rebuilt each frame from the hand's place and the elbow's.
+ */
+export class Forearm {
+  readonly group = new THREE.Group();
+  private mesh: THREE.Mesh;
+  private pos: Float32Array;
+  private cuff = new THREE.Group();
+  private twist = 0;
+  private sign: number;
+  private loopR = new Float32Array(RING).fill(0.027);
+  private loopC = new THREE.Vector3(0, -0.01, 0);
+
+  constructor(side: Side, material: THREE.Material) {
+    this.sign = side === 'right' ? 1 : -1;
+    const geo = new THREE.BufferGeometry();
+    this.pos = new Float32Array(ARM_RINGS * RING * 3);
+    geo.setAttribute('position', new THREE.BufferAttribute(this.pos, 3));
+    geo.setAttribute('rest', new THREE.BufferAttribute(new Float32Array(ARM_RINGS * RING * 3), 3));
+    geo.setAttribute('skinA', new THREE.BufferAttribute(new Float32Array(ARM_RINGS * RING * 4), 4));
+    const index: number[] = [];
+    for (let i = 0; i < ARM_RINGS - 1; i++) {
+      for (let k = 0; k < RING; k++) {
+        const a = i * RING + k, b = i * RING + ((k + 1) % RING), c = a + RING, d = b + RING;
+        index.push(a, b, c, b, d, c);
+      }
+    }
+    geo.setIndex(index);
+    this.mesh = new THREE.Mesh(geo, material);
+    this.mesh.frustumCulled = false;
+    this.mesh.receiveShadow = true;
+    this.group.add(this.mesh);
+
+    // the shirt sleeve, rolled to the elbow: creased, not turned on a lathe
+    const crease = (geo: THREE.BufferGeometry, depth: number) => {
+      const P = geo.attributes.position;
+      const v = new THREE.Vector3();
+      for (let i = 0; i < P.count; i++) {
+        v.fromBufferAttribute(P, i);
+        const a = Math.atan2(v.z, v.x);
+        const f = Math.sin(a * 5 + v.y * 40) * 0.5 + Math.sin(a * 11 - v.y * 23 + 1.3) * 0.3 + Math.sin(a * 2 + v.y * 9) * 0.4;
+        const r = 1 + f * depth;
+        P.setXYZ(i, v.x * r, v.y, v.z * r);
+      }
+      geo.computeVertexNormals();
+      return geo;
+    };
+    const rollGeo = new THREE.TorusGeometry(0.049, 0.015, 10, 32);
+    rollGeo.rotateX(Math.PI / 2);
+    const roll = new THREE.Mesh(crease(rollGeo, 0.05), MATERIALS.linen);
+    roll.scale.set(1, 1.5, 0.9);
+    const roll2 = new THREE.Mesh(crease(rollGeo.clone(), 0.07), MATERIALS.linen);
+    roll2.scale.set(1.05, 1.3, 0.94);
+    roll2.position.y = -0.03;
+    roll2.rotation.y = 1.1;
+    const sleeveGeo = new THREE.CylinderGeometry(0.052, 0.08, 0.6, 24, 12, true);
+    sleeveGeo.translate(0, -0.33, 0);
+    const sleeve = new THREE.Mesh(crease(sleeveGeo, 0.06), MATERIALS.linen);
+    sleeve.scale.set(1, 1, 0.9);
+    this.cuff.add(roll, roll2, sleeve);
+    this.cuff.traverse((o) => { o.frustumCulled = false; o.receiveShadow = true; });
+    this.group.add(this.cuff);
+    this.group.traverse((o) => { o.userData.noCollide = true; });
+    this.shape();
+  }
+
+  /** Where the wrist is, along the arm's own length. */
+  get wristY(): number { return this.loopC.y; }
+
+  /** Take the shape of a hand's wrist edge, so the two surfaces meet. */
+  fit(rig: HandRig) {
+    this.loopR.set(rig.wrist.radius);
+    this.loopC.copy(rig.wrist.centre);
+    this.shape();
+  }
+
+  /** How far out the surface is, at `s` along the arm (0 wrist, 1 elbow) and angle `k` round it. */
+  private radius(s: number, k: number): number {
+    const a = -Math.PI + (k / RING) * Math.PI * 2;
+    const grow = THREE.MathUtils.smoothstep(s, 0, 0.8);
+    const wide = THREE.MathUtils.lerp(0.0285, 0.045, grow), deep = THREE.MathUtils.lerp(0.021, 0.04, grow);
+    const c = Math.cos(a), sn = Math.sin(a);
+    let r = (wide * deep) / Math.hypot(deep * c, wide * sn);
+    // the knob of bone on the little-finger side of the wrist
+    const knob = Math.max(0, c * -this.sign * 0.75 + sn * -0.66);
+    r += Math.exp(-(((s - 0.075) / 0.04) ** 2)) * knob ** 4 * 0.0032;
+    // the muscle on the thumb side, below the elbow
+    r += THREE.MathUtils.smoothstep(s, 0.3, 0.85) * Math.max(0, c * this.sign * 0.8 + sn * -0.6) ** 2 * 0.004;
+    const join = THREE.MathUtils.smoothstep(s, 0.02, 0.2);
+    return THREE.MathUtils.lerp(this.loopR[k], r, join);
+  }
+
+  private at(i: number): number {
+    return (i <= 0 ? -0.055 : ((i - 1) / (ARM_RINGS - 2)) ** 1.35);
+  }
+
+  /** Fill in what does not change from frame to frame: where each point sits on the arm at rest. */
+  private shape() {
+    const rest = this.mesh.geometry.attributes.rest as THREE.BufferAttribute;
+    const info = this.mesh.geometry.attributes.skinA as THREE.BufferAttribute;
+    for (let i = 0; i < ARM_RINGS; i++) {
+      const s = this.at(i);
+      for (let k = 0; k < RING; k++) {
+        const a = -Math.PI + (k / RING) * Math.PI * 2;
+        const r = this.radius(Math.max(s, 0), k);
+        rest.setXYZ(i * RING + k, this.loopC.x + Math.cos(a) * r, this.loopC.y - s * ARM_LENGTH, this.loopC.z + Math.sin(a) * r);
+        info.setXYZW(i * RING + k, 0, 0, THREE.MathUtils.clamp(0.5 - Math.sin(a) * 0.9, 0, 1), 0);
+      }
+    }
+    rest.needsUpdate = true;
+    info.needsUpdate = true;
+  }
+
+  /** Forget which way the arm was last turned (after the hands are put somewhere outright). */
+  reset() { this.twist = NaN; }
+
+  /**
+   * @param wrist  the hand's origin    @param hand  the hand's turn
+   * @param elbow  where the elbow is   (all in the same space as this group)
+   */
+  update(wrist: THREE.Vector3, hand: THREE.Quaternion, elbow: THREE.Vector3) {
+    // the arm's own frame: along the bone, palm turned as the hand's is
+    _ay.copy(wrist).sub(elbow).normalize();
+    _az.set(0, 0, 1).applyQuaternion(hand);
+    _az.addScaledVector(_ay, -_az.dot(_ay));
+    if (_az.lengthSq() < 1e-6) _az.set(0, 0, 1);
+    _az.normalize();
+    // how far the palm is turned from where it rests, about the bone; followed without jumps
+    _rest.set(-this.sign * 0.85, -0.5, 0.1);
+    _rest.addScaledVector(_ay, -_rest.dot(_ay)).normalize();
+    _ax.crossVectors(_rest, _az);
+    let turn = Math.atan2(_ax.dot(_ay), _rest.dot(_az));
+    if (Number.isNaN(this.twist)) this.twist = turn;
+    while (turn - this.twist > Math.PI) turn -= Math.PI * 2;
+    while (turn - this.twist < -Math.PI) turn += Math.PI * 2;
+    // if it has wound right round, let it go the short way
+    if (Math.abs(turn) > Math.PI * 1.25) turn -= Math.sign(turn) * Math.PI * 2;
+    this.twist = turn;
+
+    const frame = (s: number, out: THREE.Quaternion) => {
+      // at the elbow the arm has only a little of the palm's turn
+      const t = turn * (1 - 0.8 * THREE.MathUtils.clamp(s, 0, 1));
+      _az.copy(_rest).applyAxisAngle(_ay, t);
+      _ax.crossVectors(_ay, _az);
+      out.setFromRotationMatrix(_mm.makeBasis(_ax, _ay, _az));
+      // close to the hand, the wrist's bend (the first of it runs straight on from the hand)
+      const bend = 1 - THREE.MathUtils.smoothstep(s, 0.035, 0.24);
+      if (bend > 0) out.slerp(hand, bend);
+      return out;
+    };
+
+    _c.copy(this.loopC).applyQuaternion(hand).add(wrist);
+    let prev = this.at(0);
+    for (let i = 0; i < ARM_RINGS; i++) {
+      const s = this.at(i);
+      frame(Math.max(s, 0), _q);
+      if (i > 0) {
+        frame(Math.max((s + prev) / 2, 0), _qa);
+        _c.addScaledVector(_p.set(0, -1, 0).applyQuaternion(_qa), (s - prev) * ARM_LENGTH);
+      } else {
+        _c.addScaledVector(_ax.set(0, 1, 0).applyQuaternion(hand), -s * ARM_LENGTH);
+      }
+      prev = s;
+      // it begins inside the hand and comes out through the skin a shade larger, so the two
+      // surfaces cross cleanly and the end of the hand is hidden
+      const shrink = i === 0 ? 0.8 : 1.04;
+      for (let k = 0; k < RING; k++) {
+        const a = -Math.PI + (k / RING) * Math.PI * 2;
+        const r = this.radius(Math.max(s, 0), k) * shrink;
+        _ax.set(Math.cos(a) * r, 0, Math.sin(a) * r).applyQuaternion(_q).add(_c);
+        this.pos.set([_ax.x, _ax.y, _ax.z], (i * RING + k) * 3);
+      }
+    }
+    this.cuff.position.copy(_c);
+    this.cuff.quaternion.copy(_q);
+    const geo = this.mesh.geometry;
+    geo.attributes.position.needsUpdate = true;
+    geo.computeVertexNormals();
+  }
 }
 
 // ---- motion ------------------------------------------------------------------------------
@@ -279,6 +538,28 @@ export class Spring {
       this.value[i] = target[i] + (change + temp) * decay;
     }
   }
+  /**
+   * Step toward a target as a damped spring. `zeta` below 1 lets it carry a little past and
+   * settle, which reads as follow-through; `scale` stretches the time of each channel, so some
+   * arrive later than others. Exact for any frame time.
+   */
+  stepDamped(target: ArrayLike<number>, time: number, zeta: number, dt: number, scale?: ArrayLike<number>) {
+    for (let i = 0; i < this.value.length; i++) {
+      const omega = 2 / Math.max(time * (scale ? scale[i] : 1), 1e-4);
+      const x0 = this.value[i] - target[i], v0 = this.velocity[i];
+      if (zeta >= 0.999) {
+        const e = Math.exp(-omega * dt), k = v0 + omega * x0;
+        this.value[i] = target[i] + (x0 + k * dt) * e;
+        this.velocity[i] = (v0 - omega * k * dt) * e;
+      } else {
+        const wd = omega * Math.sqrt(1 - zeta * zeta);
+        const b = (v0 + zeta * omega * x0) / wd;
+        const e = Math.exp(-zeta * omega * dt), c = Math.cos(wd * dt), sn = Math.sin(wd * dt);
+        this.value[i] = target[i] + e * (x0 * c + b * sn);
+        this.velocity[i] = e * ((b * wd - zeta * omega * x0) * c - (x0 * wd + zeta * omega * b) * sn);
+      }
+    }
+  }
   /** Give it a shove, for recoil and flinches. */
   kick(impulse: ArrayLike<number>) {
     for (let i = 0; i < this.velocity.length; i++) this.velocity[i] += impulse[i] ?? 0;
@@ -307,6 +588,13 @@ export interface Beat {
   /** Pose for the hand that leads the gesture, and for the other hand (omit to leave it be). */
   lead?: ArmPose;
   other?: ArmPose;
+}
+
+/** One beat of a single arm's motion. */
+export interface ArmBeat {
+  t: number;
+  ease: number;
+  pose: ArmPose;
 }
 
 export const ARM_SIZE = 9 + SHAPE_SIZE;

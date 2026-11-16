@@ -235,7 +235,7 @@ export class Game {
   private die() {
     this.mode = 'dead';
     this.deadClock = 0;
-    this.caster.drop();
+    this.caster.reset();
     this.knowledge.deaths++;
     saveKnowledge(this.knowledge);
     this.hud.showDeath(this.knowledge, this.player.cause);
@@ -245,7 +245,7 @@ export class Game {
   private respawn() {
     this.enemies.clear();
     this.spells.clear();
-    this.caster.drop();
+    this.caster.reset();
     this.resetStands();
     this.player.spawn(this.level.spawn.position, this.level.spawn.yaw);
     this.hud.setPlace('', '');
@@ -507,6 +507,9 @@ export class Game {
 
   private present(dt: number) {
     const cam = this.view.camera;
+    // how close the wall ahead is, so the light of a held word stays on this side of it
+    const ahead = this.world.raycast(this.player.eye, this.player.aim, 1.5);
+    this.view.reach = ahead ? ahead.point.distanceTo(this.player.eye) : 99;
     this.view.update(dt, this.player, this.caster.sentence.length > 0);
     this.fx.update(this.mode === 'playing' || this.mode === 'dead' ? dt : 0);
     this.level.update?.(this.time, dt);
@@ -532,6 +535,7 @@ export class Game {
     this.view.camera.aspect = w / h;
     this.view.camera.updateProjectionMatrix();
     this.fx.resize(h * this.renderer.getPixelRatio(), this.view.baseFov);
+    this.view.setViewport(h * this.renderer.getPixelRatio());
   }
 
   run() {

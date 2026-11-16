@@ -71,18 +71,34 @@ export class Caster {
       game.hud.shakeFocus();
       return;
     }
-    const problem = game.spells.cast(spell);
+    const problem = game.spells.problem(spell);
     if (problem) {
       game.hud.whisper(problem);
       return;
     }
-    game.player.spendFocus(spell.cost);
-    this.busy = spell.recovery;
+    // The hands wind up first; the spell itself is made on the strike, a moment later.
+    const wait = game.view.release(true, spell);
+    this.busy = wait + spell.recovery;
     this.sinceCast = 0;
-    game.view.release(true, spell);
     this.sentence.length = 0;
     game.hud.setSentence(this.sentence, null, false);
+    this.winding = { spell, t: wait };
+  }
 
+  /** A cast that has begun but not yet left the hands. */
+  private winding: { spell: SpellDef; t: number } | null = null;
+
+  private strike(spell: SpellDef) {
+    const { game } = this;
+    const problem = game.player.focus < spell.cost ? 'Not enough focus.' : game.spells.cast(spell);
+    if (problem) {
+      game.view.strike(null, false);
+      game.hud.whisper(problem);
+      this.busy = Math.min(this.busy, 0.2);
+      return;
+    }
+    game.player.spendFocus(spell.cost);
+    game.view.strike(spell);
     if (!this.known(spell)) {
       game.knowledge.sentences.push(spell.key);
       saveKnowledge(game.knowledge);
@@ -92,9 +108,27 @@ export class Caster {
     }
   }
 
+  /** Abandon whatever is half said or half cast (on dying, on waking). */
+  reset() {
+    this.sentence.length = 0;
+    if (this.winding) this.game.view.strike(null, false);
+    else this.game.view.release(false);
+    this.winding = null;
+    this.busy = 0;
+    this.game.hud.setSentence(this.sentence, null, false);
+  }
+
   update(dt: number) {
     this.busy = Math.max(0, this.busy - dt);
     this.sinceCast += dt;
     this.sinceSpoke += dt;
+    if (this.winding) {
+      this.winding.t -= dt;
+      if (this.winding.t <= 0) {
+        const { spell } = this.winding;
+        this.winding = null;
+        this.strike(spell);
+      }
+    }
   }
 }

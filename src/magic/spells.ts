@@ -77,16 +77,27 @@ export class Spells {
     const { player, world } = this.game;
     const eye = player.eye, aim = player.aim;
     const hit = world.raycast(eye, aim, range);
-    let probe: THREE.Vector3;
-    if (hit) {
-      if (hit.normal.y > 0.6) return { point: hit.point, normal: hit.normal };
-      probe = hit.point.clone().addScaledVector(hit.normal, 0.6);
-    } else {
-      probe = eye.clone().addScaledVector(aim, range);
+    if (!hit) {
+      const below = world.groundBelow(eye.clone().addScaledVector(aim, range), 40);
+      return below && below.normal.y >= 0.6 ? { point: below.point, normal: below.normal } : null;
     }
-    const below = world.groundBelow(probe, 40);
-    if (!below || below.normal.y < 0.6) return null;
-    return { point: below.point, normal: below.normal };
+    if (hit.normal.y > 0.6) return { point: hit.point, normal: hit.normal };
+    // Looking at a wall or the side of a rock: take the nearest level ground at its foot,
+    // feeling a little further out each time.
+    for (const out of [0.6, 1.3, 2.2]) {
+      const below = world.groundBelow(hit.point.clone().addScaledVector(hit.normal, out), 40);
+      if (below && below.normal.y >= 0.6) return { point: below.point, normal: below.normal };
+    }
+    return null;
+  }
+
+  /** Why a sentence could not take shape where the player is looking, or null if it could. */
+  problem(spell: SpellDef): string | null {
+    const e = spell.effect;
+    if (e.kind === 'zone') return this.groundTarget(e.range) ? null : 'There is no ground there for it to settle on.';
+    if (e.kind === 'pillar') return this.groundTarget(e.range) ? null : 'The stone will not rise there.';
+    if (e.kind === 'updraft') return this.groundTarget(e.range) ? null : 'The air has nothing to rise from there.';
+    return null;
   }
 
   /**
@@ -537,7 +548,8 @@ export class Spells {
           u.kicked.add(en);
           en.apply({ stagger: 1.4 });
           en.knock(_v.set((Math.random() - 0.5) * 3, u.kick + 2, (Math.random() - 0.5) * 3));
-        } else {
+        } else if (en.velocity.y > 0) {
+          // it carries them up, but does nothing to break their fall
           en.velocity.y += u.lift * 0.5 * dt;
         }
       }
