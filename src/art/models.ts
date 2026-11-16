@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { ConvexGeometry } from 'three/addons/geometries/ConvexGeometry.js';
 
-export type ModelName = 'ship' | 'boulder' | 'slab' | 'crate' | 'barrels' | 'branches';
+export type ModelName = 'ship' | 'boulder' | 'slab' | 'crate' | 'barrels' | 'branches' | 'hand';
 
 const FILES: Record<ModelName, string> = {
   ship: 'dutch_ship_medium',
@@ -13,6 +13,8 @@ const FILES: Record<ModelName, string> = {
   crate: 'wooden_crate_01',
   barrels: 'wooden_barrels_01',
   branches: 'dry_branches_medium_01',
+  // a second copy of the player's hand model, for the dead mage
+  hand: '../hands/right',
 };
 
 export class Models {
@@ -21,6 +23,11 @@ export class Models {
 
   has(name: ModelName) {
     return this.scenes.has(name);
+  }
+
+  /** The loaded model itself, not a copy. For rigged models, which cannot simply be cloned. */
+  take(name: ModelName): THREE.Object3D | null {
+    return this.scenes.get(name) ?? null;
   }
 
   /** A copy of a whole model. Geometry and materials are shared, so copies are cheap. */

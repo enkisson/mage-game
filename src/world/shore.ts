@@ -7,8 +7,9 @@ import * as THREE from 'three';
 import { clamp, smoothstep, fbm, rng, distToSegment } from '../core/math';
 import { mergeForCollision } from './world';
 import type { Level, JournalDef, StandDef } from './level';
-import { MATERIALS, waterRipples } from '../art/materials';
+import { MATERIALS, waterRipples, seaUniforms } from '../art/materials';
 import { centred, type Models } from '../art/models';
+import { HandRig, SHAPES, shapeToArray } from '../player/hands';
 
 export const COVE = { x: 0, z: -70, r: 26 };
 const BOUNDS = { minX: -62, maxX: 62, minZ: -112, maxZ: 62 };
@@ -195,31 +196,84 @@ function bowWreck(): THREE.Group {
   return g;
 }
 
-/** The robed body at the waterline. */
-function body(): THREE.Group {
+/**
+ * The robed body at the waterline: face down, one arm thrown forward, the journal under its
+ * hand. Returns where the journal lies, in the body's own frame.
+ */
+function body(handModel: THREE.Object3D | null): { group: THREE.Group; journalAt: THREE.Vector3 } {
   const g = new THREE.Group();
-  const robe = MATERIALS.cloth;
-  const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.26, 0.9, 6, 12), robe);
-  torso.rotation.z = Math.PI / 2;
-  torso.position.set(0, 0.2, 0);
-  torso.scale.set(1, 1, 1.25);
-  g.add(torso);
-  const legs = new THREE.Mesh(new THREE.CapsuleGeometry(0.2, 0.8, 6, 10), robe);
-  legs.rotation.z = Math.PI / 2;
-  legs.rotation.y = 0.25;
-  legs.position.set(-0.95, 0.14, 0.1);
-  legs.scale.set(1, 1, 1.5);
-  g.add(legs);
-  const hood = new THREE.Mesh(new THREE.SphereGeometry(0.2, 12, 10), robe);
-  hood.position.set(0.82, 0.2, 0.02);
-  hood.scale.set(1.15, 0.9, 1);
-  g.add(hood);
-  const arm = new THREE.Mesh(new THREE.CapsuleGeometry(0.075, 0.6, 4, 8), robe);
-  arm.rotation.set(0, 0.9, Math.PI / 2);
-  arm.position.set(0.35, 0.1, 0.5);
-  g.add(arm);
-  g.traverse((o) => { (o as THREE.Mesh).castShadow = true; o.userData.noCollide = true; });
-  return g;
+  const robe = new THREE.MeshStandardMaterial({ color: 0x232a3d, roughness: 1 });
+  /** A rounded mass of wet cloth, creased by noise so it does not look turned on a lathe. */
+  const drape = (size: [number, number, number], at: [number, number, number], seed: number, rot: [number, number, number] = [0, 0, 0]) => {
+    const geo = new THREE.SphereGeometry(1, 28, 18);
+    const pos = geo.attributes.position;
+    const v = new THREE.Vector3();
+    for (let i = 0; i < pos.count; i++) {
+      v.fromBufferAttribute(pos, i);
+      const fold = fbm(v.x * 3.1 + seed, v.z * 4.3 - seed, 3) * 0.16 + fbm(v.x * 9 + seed, v.z * 11, 2) * 0.05;
+      v.multiplyScalar(1 + fold);
+      if (v.y < 0) v.y *= 0.25; // flat where it lies on the sand
+      pos.setXYZ(i, v.x * size[0], v.y * size[1], v.z * size[2]);
+    }
+    geo.computeVertexNormals();
+    const m = new THREE.Mesh(geo, robe);
+    m.position.set(...at);
+    m.rotation.set(...rot);
+    m.castShadow = true;
+    m.receiveShadow = true;
+    g.add(m);
+    return m;
+  };
+  // lying along -Z, head inland, face down
+  drape([0.4, 0.17, 0.5], [0, 0.03, -0.18], 1); // shoulders and back
+  drape([0.46, 0.13, 0.82], [0.04, 0.02, 0.62], 2, [0, 0.08, 0]); // the robe's skirts, spread by the water
+  drape([0.2, 0.17, 0.25], [0.02, 0.05, -0.74], 3); // the hood
+  drape([0.13, 0.09, 0.36], [0.4, 0.03, -0.72], 4, [0, -0.62, 0]); // the reaching arm in its sleeve
+  drape([0.15, 0.07, 0.2], [0.6, 0.02, -1.0], 5, [0, -0.5, 0]); // the sleeve's wide mouth
+  drape([0.12, 0.08, 0.3], [-0.36, 0.03, -0.2], 6, [0, 0.5, 0]); // the other arm, folded under
+  for (const sx of [0.13, -0.1]) {
+    const boot = new THREE.Mesh(new THREE.CapsuleGeometry(0.055, 0.16, 4, 8), MATERIALS.leather);
+    boot.position.set(sx, 0.05, 1.4);
+    boot.rotation.set(Math.PI / 2, 0, sx * 2);
+    boot.castShadow = true;
+    g.add(boot);
+  }
+
+  const wrist = new THREE.Vector3(0.7, 0.05, -1.12);
+  if (handModel) {
+    const skin = new THREE.MeshStandardMaterial({ color: 0x8b9088, roughness: 0.6 });
+    const rig = new HandRig(handModel, 'right', skin);
+    const shape = new Float32Array(16);
+    shapeToArray(SHAPES.relaxed, shape);
+    rig.setShape(shape);
+    // palm down on the sand, fingers pointing inland past the journal
+    rig.root.position.copy(wrist);
+    rig.root.rotation.order = 'YXZ';
+    rig.root.rotation.set(-Math.PI / 2 + 0.1, -0.45, 0);
+    rig.mesh.castShadow = true;
+    g.add(rig.root);
+  }
+  g.traverse((o) => { o.userData.noCollide = true; });
+  return { group: g, journalAt: new THREE.Vector3(wrist.x + 0.13, 0.035, wrist.z - 0.27) };
+}
+
+/** A soft additive glow that always faces the camera. */
+function glowSprite(color: number, size: number, brightness: number): THREE.Sprite {
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const ctx = c.getContext('2d')!;
+  const grad = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+  grad.addColorStop(0, 'rgba(255,255,255,1)');
+  grad.addColorStop(0.25, 'rgba(255,255,255,0.5)');
+  grad.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 64, 64);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, color: new THREE.Color(color).multiplyScalar(brightness), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, fog: false }));
+  s.scale.setScalar(size);
+  s.userData.noCollide = true;
+  return s;
 }
 
 /** A dark pool the Gloam rise out of. */
@@ -408,6 +462,7 @@ export function buildShore(models: Models): Level {
 
   // --- the wreck -------------------------------------------------------------------------
   let deckJournal: THREE.Vector3;
+  let lantern: THREE.PointLight | null = null;
   const landmarks: Record<string, THREE.Vector3> = {};
   const shipModel = models.clone('ship');
   if (shipModel) {
@@ -431,6 +486,16 @@ export function buildShore(models: Models): Level {
     landmarks.gangwayFoot = foot.clone();
     landmarks.gangwayTop = top.clone();
     landmarks.deck = onShip(0.6, 1.75, 0);
+
+    // the stern lantern is still burning
+    const lampAt = onShip(-10.15, 5.72, 0);
+    lantern = new THREE.PointLight(0xffb060, 26, 30, 1.6);
+    lantern.position.copy(lampAt);
+    root.add(lantern);
+    const lampGlow = glowSprite(0xffb060, 1.5, 2.2);
+    lampGlow.position.copy(lampAt);
+    root.add(lampGlow);
+    landmarks.lantern = lampAt;
 
     // sea chests lashed on deck: steps up to the quarterdeck
     const crate = models.piece('crate', 'wooden_crate_01');
@@ -531,10 +596,12 @@ export function buildShore(models: Models): Level {
 
   // --- story objects ---------------------------------------------------------------------
   const bodySpot = new THREE.Vector3(4.2, ground(4.2, 22.5), 22.5);
-  const corpse = body();
-  corpse.position.copy(bodySpot);
-  corpse.rotation.y = 0.5;
-  root.add(corpse);
+  const corpse = body(models.take('hand'));
+  corpse.group.position.copy(bodySpot).setY(bodySpot.y - 0.03);
+  corpse.group.rotation.y = -0.45;
+  root.add(corpse.group);
+  corpse.group.updateMatrixWorld(true);
+  const firstPage = corpse.group.localToWorld(corpse.journalAt.clone());
 
   const ravineSpot = new THREE.Vector3(pathX(-37) + 0.6, ground(pathX(-37) + 0.6, -37), -37);
   const mesaSpot = new THREE.Vector3(MESA.x + 0.5, ground(MESA.x + 0.5, MESA.z - 0.5), MESA.z - 0.5);
@@ -542,7 +609,7 @@ export function buildShore(models: Models): Level {
   const journals: JournalDef[] = [
     {
       id: 'shore-1', teaches: 'fire', title: 'The first page',
-      position: bodySpot.clone().add(new THREE.Vector3(0.75, 0.05, 0.75)),
+      position: firstPage,
       text: [
         'If you are reading this, the tide has given you to the island as it gave me. I am sorry. It does not give anything back.',
         'You will not last a night here without a word to speak. So: the first one. Every apprentice begins with it, because it is the one that least needs to be understood.',
@@ -622,10 +689,43 @@ export function buildShore(models: Models): Level {
   const collision = mergeForCollision([solid, walls]);
 
   // --- the sea ---------------------------------------------------------------------------
-  const sea = new THREE.Mesh(new THREE.PlaneGeometry(900, 900, 1, 1), MATERIALS.water);
+  // fine near the beach, where the depth changes and the foam runs; coarse out to the horizon
+  const seaGeo = (() => {
+    const xs: number[] = [], zs: number[] = [];
+    for (let x = -150; x <= 150; x += 2.5) xs.push(x);
+    for (let z = 16; z <= 70; z += 1.25) zs.push(z);
+    for (const z of [80, 100, 140, 220, 400, 900]) zs.push(z);
+    xs.unshift(-900, -400);
+    xs.push(400, 900);
+    const pos: number[] = [], depth: number[] = [], uv: number[] = [], idx: number[] = [];
+    for (const z of zs) {
+      for (const x of xs) {
+        // laid in the XY plane and turned flat afterwards, so "up" for the swell is +Z
+        pos.push(x, -z, 0);
+        depth.push(Math.min(12, -ground(Math.max(-70, Math.min(70, x)), Math.min(z, 60)) + (z > 60 ? (z - 60) * 0.1 : 0)));
+        uv.push(x / 900, z / 900);
+      }
+    }
+    const w = xs.length;
+    for (let j = 0; j < zs.length - 1; j++) {
+      for (let i = 0; i < w - 1; i++) {
+        const a = j * w + i, b = a + 1, c = a + w, d2 = c + 1;
+        idx.push(a, c, b, b, c, d2);
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute('depth', new THREE.Float32BufferAttribute(depth, 1));
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    g.setIndex(idx);
+    g.computeVertexNormals();
+    return g;
+  })();
+  const sea = new THREE.Mesh(seaGeo, MATERIALS.water);
   sea.rotation.x = -Math.PI / 2;
-  sea.position.set(0, 0, 200);
+  sea.renderOrder = 2;
   sea.userData.noCollide = true;
+  sea.receiveShadow = true;
   root.add(sea);
 
   return {
@@ -644,6 +744,8 @@ export function buildShore(models: Models): Level {
       // the swell drifts shoreward, and the grass leans with the wind
       waterRipples.offset.set(time * 0.012, -time * 0.02);
       grassTime.value = time;
+      seaUniforms.uTime.value = time;
+      if (lantern) lantern.intensity = 26 * (0.82 + Math.sin(time * 11) * 0.06 + Math.sin(time * 23.7) * 0.05 + Math.sin(time * 3.1) * 0.07);
     },
   };
 }

@@ -12,6 +12,8 @@ const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/cs
 const SCENARIOS = {
   title: `g.debug.render()`,
   wake: `g.debug.start(); g.debug.advance(0.5);`,
+  body: `g.debug.start(); g.debug.teleport(5.6, 24.6, 0.55, -0.62); g.debug.advance(0.3);`,
+  stern: `g.debug.start(); g.debug.teleport(12, 12, 1.1, 0.25); g.debug.advance(0.3);`,
   ship: `g.debug.start(); g.debug.teleport(14, 24, 0.75, 0.12); g.debug.advance(0.3);`,
   deck: `g.debug.start(); g.debug.teleport(-4.6, 5.2, 1.4, -0.1); g.debug.advance(0.5);`,
   dunes: `g.debug.start(); g.debug.teleport(16, -10, 0.9, -0.05); g.debug.advance(0.3);`,

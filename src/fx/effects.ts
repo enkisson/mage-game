@@ -23,6 +23,8 @@ export interface Emit {
   /** Size multiplier reached by the end of life (default: shrink to 0.2). */
   grow?: number;
   brightness?: number;
+  /** Peak opacity, for faint things like mist (default 1). */
+  alpha?: number;
 }
 
 const MAX = 6000;
@@ -46,6 +48,7 @@ class Cloud {
   private grow = new Float32Array(MAX);
   private gravity = new Float32Array(MAX);
   private drag = new Float32Array(MAX);
+  private alpha = new Float32Array(MAX);
   readonly material: THREE.ShaderMaterial;
 
   constructor(additive: boolean) {
@@ -125,6 +128,7 @@ class Cloud {
       this.grow[i] = e.grow ?? 0.2;
       this.gravity[i] = e.gravity ?? 0;
       this.drag[i] = e.drag ?? 0;
+      this.alpha[i] = e.alpha ?? 1;
     }
   }
 
@@ -147,6 +151,7 @@ class Cloud {
           this.grow[i] = this.grow[l];
           this.gravity[i] = this.gravity[l];
           this.drag[i] = this.drag[l];
+          this.alpha[i] = this.alpha[l];
         }
         continue;
       }
@@ -159,7 +164,8 @@ class Cloud {
       this.pos[i * 3 + 2] += this.vel[i * 3 + 2] * dt;
       const t = 1 - this.life[i] / this.maxLife[i];
       this.sa[i * 2] = this.size0[i] * (1 + (this.grow[i] - 1) * t);
-      this.sa[i * 2 + 1] = Math.min(1, t * 8) * (1 - t * t);
+      const attack = this.maxLife[i] > 4 ? Math.min(1, t * 5) : Math.min(1, t * 8);
+      this.sa[i * 2 + 1] = attack * (1 - t * t) * this.alpha[i];
       i++;
     }
     const g = this.points.geometry;
@@ -272,6 +278,11 @@ export class Effects {
   gloamPuff(at: THREE.Vector3, amount = 1) {
     this.glow.emit(at, { count: Math.round(26 * amount), color: FX_COLORS.gloam, speed: [0.6, 3.5], life: [0.4, 1.1], size: [0.2, 0.6], drag: 2, gravity: -1.5, radius: 0.4, brightness: 1.3 });
     this.dust.emit(at, { count: Math.round(10 * amount), color: [0x0c120c, 0x1c2a1c], speed: [0.4, 1.8], life: [0.6, 1.4], size: [0.8, 1.8], drag: 2, gravity: -0.8, radius: 0.4, grow: 2 });
+  }
+
+  /** One slow, faint bank of sea mist. */
+  mist(at: THREE.Vector3, wind: THREE.Vector3) {
+    this.dust.emit(at, { count: 1, color: [0x8f96aa, 0x6f7488], speed: [0.5, 1.1], life: [7, 12], size: [7, 13], dir: wind, spread: 0.25, grow: 1.5, alpha: 0.085 });
   }
 
   spark(at: THREE.Vector3, color: [number, number], count = 10, speed = 5) {

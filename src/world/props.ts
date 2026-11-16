@@ -23,7 +23,8 @@ let shaftTex: THREE.Texture | null = null;
 export interface JournalProp {
   root: THREE.Group;
   setRead(read: boolean): void;
-  update(time: number): void;
+  /** `distance` is how far away the player is: the shaft thins out as you come close. */
+  update(time: number, distance: number): void;
 }
 
 /** A journal page: a small book under a thin shaft of light, so it can be seen from a distance. */
@@ -41,7 +42,7 @@ export function journalProp(): JournalProp {
 
   shaftTex ??= shaftTexture();
   const shaftMat = new THREE.MeshBasicMaterial({ map: shaftTex, color: new THREE.Color(0xffd98a).multiplyScalar(1.3), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false });
-  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.2, 7, 12, 1, true), shaftMat);
+  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.11, 7, 12, 1, true), shaftMat);
   shaft.position.y = 3.5;
   root.add(shaft);
   const mote = new THREE.Mesh(new THREE.OctahedronGeometry(0.06, 0), new THREE.MeshBasicMaterial({ color: new THREE.Color(0xffd98a).multiplyScalar(3) }));
@@ -57,11 +58,13 @@ export function journalProp(): JournalProp {
       shaft.visible = !r;
       mote.visible = !r;
     },
-    update(time) {
+    update(time, distance) {
       if (read) return;
       mote.position.y = 0.55 + Math.sin(time * 2) * 0.06;
       mote.rotation.y = time * 1.5;
-      shaftMat.opacity = 0.75 + Math.sin(time * 1.7) * 0.2;
+      // a beacon from far off, a faint thread once you are standing over it
+      const far = Math.min(1, Math.max(0, (distance - 2.5) / 9));
+      shaftMat.opacity = (0.12 + 0.6 * far) * (0.85 + Math.sin(time * 1.7) * 0.15);
     },
   };
 }

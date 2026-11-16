@@ -28,6 +28,12 @@ import type { ArmPose } from '../player/hands';
 type Mode = 'title' | 'playing' | 'paused' | 'reading' | 'book' | 'dead';
 
 const STEP = 1 / 60;
+const _up = new THREE.Vector3(0, 1, 0);
+const _right = new THREE.Vector3();
+const _upL = new THREE.Vector3();
+const _centre = new THREE.Vector3();
+/** The wind off the sea: it carries the mist and leans the grass. */
+const _wind = new THREE.Vector3(0.5, 0.03, -0.86);
 const SENSITIVITY = 0.0023;
 
 interface StandRun {
@@ -71,6 +77,7 @@ export class Game {
   private atExit = false;
   private reading: JournalDef | null = null;
   private seaClock = 0;
+  private mistClock = 0;
   private exitSpot: THREE.Vector3;
   /** When true the loop idles and tests drive the game step by step. */
   private manual = false;
@@ -425,6 +432,18 @@ export class Game {
     this.enemies.update(dt);
     for (const st of this.stands) this.updateStand(st, dt);
 
+    // sea mist drifting in over the low ground
+    this.mistClock += dt;
+    if (this.mistClock > 0.16) {
+      this.mistClock = 0;
+      const a = Math.random() * Math.PI * 2, d = 10 + Math.random() * 34;
+      const x = this.player.position.x + Math.cos(a) * d, z = this.player.position.z + Math.sin(a) * d;
+      const y = this.world.groundAt(x, z);
+      if (y !== null && y < this.player.position.y + 3 && y > this.world.waterLevel - 0.5) {
+        this.fx.mist(_centre.set(x, Math.max(y, this.world.waterLevel) + 0.9, z), _wind);
+      }
+    }
+
     // the sea does not let you leave
     if (this.player.alive && this.player.position.y < this.world.waterLevel - 1.15) {
       this.seaClock += dt;
@@ -442,8 +461,8 @@ export class Game {
     // what can be used from here
     let near: JournalDef | null = null;
     for (const j of this.journals) {
-      j.prop.update(this.time);
       const d = j.def.position.distanceTo(this.player.position);
+      j.prop.update(this.time, d);
       if (d < 2.7) near = j.def;
     }
     this.nearJournal = near;
@@ -484,9 +503,15 @@ export class Game {
     this.fx.update(this.mode === 'playing' || this.mode === 'dead' ? dt : 0);
     this.level.update?.(this.time, dt);
     this.sky.update(cam);
-    const p = this.player.position;
-    this.sky.key.position.copy(p).addScaledVector(this.sky.keyDir, 90);
-    this.sky.key.target.position.copy(p);
+    // keep the shadow map centred on the player, moving it in whole texels so shadows do not crawl
+    const p = this.player.position, dir = this.sky.keyDir;
+    const right = _right.crossVectors(_up, dir).normalize();
+    const upL = _upL.crossVectors(dir, right);
+    const texel = 92 / 4096;
+    const sx = Math.round(p.dot(right) / texel) * texel, sy = Math.round(p.dot(upL) / texel) * texel;
+    const centre = _centre.set(0, 0, 0).addScaledVector(right, sx).addScaledVector(upL, sy).addScaledVector(dir, p.dot(dir));
+    this.sky.key.target.position.copy(centre);
+    this.sky.key.position.copy(centre).addScaledVector(dir, 90);
     this.hud.update(dt, this.player.health, this.player.focus);
     this.composer.render();
   }

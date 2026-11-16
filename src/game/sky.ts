@@ -76,7 +76,7 @@ export function createSky(scene: THREE.Scene, o: SkyOptions): NightSky {
   const keyDir = new THREE.Vector3(...o.keyDir).normalize();
   const key = new THREE.DirectionalLight(o.keyColor, o.keyIntensity);
   key.castShadow = true;
-  key.shadow.mapSize.set(2048, 2048);
+  key.shadow.mapSize.set(4096, 4096);
   const s = 46;
   Object.assign(key.shadow.camera, { left: -s, right: s, top: s, bottom: -s, near: 1, far: 220 });
   key.shadow.bias = -0.0006;

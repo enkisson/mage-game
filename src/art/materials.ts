@@ -123,6 +123,61 @@ function rippleNormals(size = 256): THREE.DataTexture {
 
 export const waterRipples = rippleNormals();
 
+export const seaUniforms = { uTime: { value: 0 } };
+
+/**
+ * The sea. Each vertex knows how deep the water is under it, so the edge can be clear and
+ * shallow, the open water dark, and a line of foam can ride the swell up and down the sand.
+ */
+function seaMaterial(): THREE.MeshStandardMaterial {
+  const m = new THREE.MeshStandardMaterial({
+    color: 0xffffff, roughness: 0.1, metalness: 0.3, transparent: true, normalMap: waterRipples,
+    normalScale: new THREE.Vector2(0.5, 0.5), envMapIntensity: 1.6,
+  });
+  m.onBeforeCompile = (shader) => {
+    shader.uniforms.uTime = seaUniforms.uTime;
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', `#include <common>
+        attribute float depth;
+        uniform float uTime;
+        varying float vDepth;
+        varying vec2 vShore;`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+        // the swell: the whole surface breathes, and with it the waterline moves on the sand
+        float swell = sin(uTime * 0.55 + position.x * 0.05) * 0.07 + sin(uTime * 0.9 + position.x * 0.13 + 1.7) * 0.035;
+        transformed.z += swell;
+        vDepth = depth + swell;
+        vShore = position.xy;`);
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', `#include <common>
+        uniform float uTime;
+        varying float vDepth;
+        varying vec2 vShore;
+        float seaHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+        float seaNoise(vec2 p) {
+          vec2 i = floor(p), f = fract(p);
+          f = f * f * (3.0 - 2.0 * f);
+          return mix(mix(seaHash(i), seaHash(i + vec2(1.0, 0.0)), f.x), mix(seaHash(i + vec2(0.0, 1.0)), seaHash(i + vec2(1.0, 1.0)), f.x), f.y);
+        }`)
+      .replace('#include <map_fragment>', `
+        float d = vDepth;
+        if (d < 0.0) discard;
+        vec3 shallow = vec3(0.16, 0.2, 0.2);
+        vec3 deep = vec3(0.012, 0.03, 0.045);
+        diffuseColor.rgb = mix(shallow, deep, smoothstep(0.0, 1.6, d));
+        // foam: a bright lip at the very edge, and broken streaks behind it
+        float lace = seaNoise(vShore * 1.7 + vec2(uTime * 0.25, -uTime * 0.4)) * 0.6 + seaNoise(vShore * 5.0 - vec2(uTime * 0.5, 0.0)) * 0.4;
+        float lip = smoothstep(0.1, 0.0, d);
+        float streaks = smoothstep(0.55, 0.05, d) * smoothstep(0.52, 0.8, lace);
+        float foam = clamp(lip * 0.9 + streaks * 0.7, 0.0, 1.0);
+        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.62, 0.66, 0.7), foam);
+        diffuseColor.a = mix(smoothstep(0.0, 0.5, d) * 0.5 + smoothstep(0.2, 1.4, d) * 0.45, 0.9, foam);`)
+      .replace('#include <roughnessmap_fragment>', `
+        float roughnessFactor = mix(roughness, 0.85, foam);`);
+  };
+  return m;
+}
+
 export const MATERIALS = {
   ground: groundMaterial(),
   rock: new THREE.MeshStandardMaterial({ color: 0x57535a, roughness: 0.92 }),
@@ -133,7 +188,7 @@ export const MATERIALS = {
   linen: new THREE.MeshStandardMaterial({ color: 0x8f8672, roughness: 0.95 }),
   leather: new THREE.MeshStandardMaterial({ color: 0x3a2b22, roughness: 0.8 }),
   conjuredStone: new THREE.MeshStandardMaterial({ color: 0x77706a, roughness: 0.9, emissive: 0xd9a35a, emissiveIntensity: 0.05 }),
-  water: new THREE.MeshStandardMaterial({ color: 0x0b1820, roughness: 0.1, metalness: 0.35, transparent: true, opacity: 0.93, normalMap: waterRipples, normalScale: new THREE.Vector2(0.55, 0.55), envMapIntensity: 1.6 }),
+  water: seaMaterial(),
 };
 
 function prep(tex: THREE.Texture, srgb: boolean, anisotropy: number) {
