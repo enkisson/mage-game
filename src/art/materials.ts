@@ -121,7 +121,7 @@ function groundMaterial(): THREE.MeshStandardMaterial {
           vec3 nG = texture2D(sandNormal, vWPos.xz * sandScale * 4.7 + 0.11).xyz * 2.0 - 1.0;
           vec3 sandTilt = vec3(nS.x, 0.0, nS.y) * 0.8 + vec3(nG.x, 0.0, nG.y) * 0.7 * gNear;
           // each ripple leans its lee face away from the wind
-          sandTilt.xz += vec2(0.5, -0.866) * sin(phaseOf(vWPos.xz)) * 0.55 * gRippleAmt;
+          sandTilt.xz += vec2(0.5, -0.866) * sin(phaseOf(vWPos.xz)) * 0.42 * gRippleAmt;
           vec3 sandN = normalize(sandTilt + wn);
           vec3 worldN = normalize(mix(sandN, rockN, gRock));
           normal = normalize((viewMatrix * vec4(worldN, 0.0)).xyz);

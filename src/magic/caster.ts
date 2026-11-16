@@ -99,6 +99,7 @@ export class Caster {
     }
     game.player.spendFocus(spell.cost);
     game.view.strike(spell);
+    if (spell.cost >= 35) game.hitStop(0.045);
     if (!this.known(spell)) {
       game.knowledge.sentences.push(spell.key);
       saveKnowledge(game.knowledge);

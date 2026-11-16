@@ -25,6 +25,8 @@ export interface Emit {
   brightness?: number;
   /** Peak opacity, for faint things like mist (default 1). */
   alpha?: number;
+  /** Burns: starts white-hot and cools through orange to a dull red as it dies. */
+  fire?: boolean;
 }
 
 const MAX = 6000;
@@ -49,6 +51,8 @@ class Cloud {
   private gravity = new Float32Array(MAX);
   private drag = new Float32Array(MAX);
   private alpha = new Float32Array(MAX);
+  /** Per particle: a random seed (plus 2 if it burns), and how far through its life it is. */
+  private misc = new Float32Array(MAX * 2);
   readonly material: THREE.ShaderMaterial;
 
   constructor(additive: boolean) {
@@ -56,21 +60,52 @@ class Cloud {
     geo.setAttribute('position', new THREE.BufferAttribute(this.pos, 3).setUsage(THREE.DynamicDrawUsage));
     geo.setAttribute('color', new THREE.BufferAttribute(this.col, 3).setUsage(THREE.DynamicDrawUsage));
     geo.setAttribute('sa', new THREE.BufferAttribute(this.sa, 2).setUsage(THREE.DynamicDrawUsage));
+    geo.setAttribute('misc', new THREE.BufferAttribute(this.misc, 2).setUsage(THREE.DynamicDrawUsage));
     this.material = new THREE.ShaderMaterial({
       uniforms: { uScale: { value: 600 } },
       vertexShader: `
-        attribute vec2 sa; varying vec3 vColor; varying float vAlpha; uniform float uScale;
+        attribute vec2 sa; attribute vec2 misc;
+        varying vec3 vColor; varying float vAlpha; varying vec2 vMisc; uniform float uScale;
         void main(){
-          vColor = color; vAlpha = sa.y;
+          vColor = color; vMisc = misc;
           vec4 mv = modelViewMatrix * vec4(position, 1.0);
-          gl_PointSize = min(sa.x * uScale / max(-mv.z, 0.1), 900.0);
+          float px = sa.x * uScale / max(-mv.z, 0.1);
+          // nothing fills the screen: what comes too close to the eye thins out instead
+          float cap = uScale * 0.55;
+          vAlpha = sa.y * smoothstep(0.2, 1.3, -mv.z) * (1.0 - smoothstep(cap * 0.5, cap, px));
+          gl_PointSize = min(px, cap);
           gl_Position = projectionMatrix * mv;
         }`,
       fragmentShader: additive
-        ? `varying vec3 vColor; varying float vAlpha;
-           void main(){ float d = length(gl_PointCoord - 0.5) * 2.0; float a = pow(max(1.0 - d, 0.0), 1.6) * vAlpha; gl_FragColor = vec4(vColor * a, a); }`
-        : `varying vec3 vColor; varying float vAlpha;
-           void main(){ float d = length(gl_PointCoord - 0.5) * 2.0; float a = smoothstep(1.0, 0.35, d) * vAlpha; gl_FragColor = vec4(vColor, a); }`,
+        ? `varying vec3 vColor; varying float vAlpha; varying vec2 vMisc;
+           void main(){
+             float d = length(gl_PointCoord - 0.5) * 2.0;
+             float soft = pow(max(1.0 - d, 0.0), 1.6);
+             vec3 c = vColor;
+             if (vMisc.x > 1.5) {
+               // fire cools as it rises: a white-hot heart, then orange, then a dull red
+               float t = vMisc.y;
+               c *= vec3(1.0, mix(1.0, 0.32, t), mix(0.9, 0.04, sqrt(t)));
+               c += vColor * pow(max(1.0 - d, 0.0), 5.0) * (1.0 - t) * 0.9;
+             }
+             float a = soft * vAlpha;
+             gl_FragColor = vec4(c * a, a);
+           }`
+        : `varying vec3 vColor; varying float vAlpha; varying vec2 vMisc;
+           float h(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+           float n(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f);
+             return mix(mix(h(i), h(i+vec2(1,0)), f.x), mix(h(i+vec2(0,1)), h(i+vec2(1,1)), f.x), f.y); }
+           void main(){
+             // each puff is its own ragged, turning shape, not a disc
+             float seed = fract(vMisc.x);
+             float ang = seed * 6.283 + vMisc.y * (seed - 0.5) * 2.5;
+             vec2 p = gl_PointCoord - 0.5;
+             p = vec2(p.x * cos(ang) - p.y * sin(ang), p.x * sin(ang) + p.y * cos(ang));
+             float d = length(p) * 2.0;
+             float w = n(p * 3.2 + seed * 31.0) * 0.6 + n(p * 7.5 + seed * 17.0) * 0.4;
+             float a = smoothstep(1.0, 0.25, d + (w - 0.5) * 0.85) * vAlpha;
+             gl_FragColor = vec4(vColor * (0.7 + w * 0.6), a);
+           }`,
       vertexColors: true,
       transparent: true,
       depthWrite: false,
@@ -129,6 +164,7 @@ class Cloud {
       this.gravity[i] = e.gravity ?? 0;
       this.drag[i] = e.drag ?? 0;
       this.alpha[i] = e.alpha ?? 1;
+      this.misc[i * 2] = Math.random() * 0.999 + (e.fire ? 2 : 0);
     }
   }
 
@@ -152,6 +188,7 @@ class Cloud {
           this.gravity[i] = this.gravity[l];
           this.drag[i] = this.drag[l];
           this.alpha[i] = this.alpha[l];
+          this.misc[i * 2] = this.misc[l * 2];
         }
         continue;
       }
@@ -166,6 +203,7 @@ class Cloud {
       this.sa[i * 2] = this.size0[i] * (1 + (this.grow[i] - 1) * t);
       const attack = this.maxLife[i] > 4 ? Math.min(1, t * 5) : Math.min(1, t * 8);
       this.sa[i * 2 + 1] = attack * (1 - t * t) * this.alpha[i];
+      this.misc[i * 2 + 1] = t;
       i++;
     }
     const g = this.points.geometry;
@@ -173,6 +211,7 @@ class Cloud {
     g.attributes.position.needsUpdate = true;
     g.attributes.color.needsUpdate = true;
     g.attributes.sa.needsUpdate = true;
+    g.attributes.misc.needsUpdate = true;
   }
 }
 
@@ -198,6 +237,11 @@ export class Effects {
   private flashes: Flash[] = [];
   private transients: Transient[] = [];
   private ringGeo = new THREE.RingGeometry(0.86, 1, 48);
+  /** Lights that things in flight can carry. A fixed few, so nothing has to be rebuilt mid-fight. */
+  private lamps: { light: THREE.PointLight; used: boolean }[] = [];
+  private scorchTex: THREE.Texture | null = null;
+  /** Told of every blast, and how big, so the camera can feel it. */
+  onBlast: ((at: THREE.Vector3, power: number) => void) | null = null;
 
   constructor(private scene: THREE.Scene) {
     scene.add(this.glow.points, this.dust.points);
@@ -206,6 +250,67 @@ export class Effects {
       scene.add(light);
       this.flashes.push({ light, life: 0, maxLife: 1, peak: 0 });
     }
+    for (let i = 0; i < 4; i++) {
+      const light = new THREE.PointLight(0xffffff, 0, 10, 1.8);
+      scene.add(light);
+      this.lamps.push({ light, used: false });
+    }
+  }
+
+  /** Borrow a light to carry (on a bolt, over a fire). Null if all are out. */
+  lamp(color: number, intensity: number, distance: number): THREE.PointLight | null {
+    const slot = this.lamps.find((l) => !l.used);
+    if (!slot) return null;
+    slot.used = true;
+    slot.light.color.set(color);
+    slot.light.intensity = intensity;
+    slot.light.distance = distance;
+    slot.light.position.set(0, 0, 0);
+    return slot.light;
+  }
+
+  /** Give a borrowed light back. */
+  unlamp(light: THREE.PointLight | null | undefined) {
+    const slot = this.lamps.find((l) => l.light === light);
+    if (!slot) return;
+    slot.used = false;
+    slot.light.intensity = 0;
+    this.scene.add(slot.light);
+  }
+
+  /** A burn left on the ground, fading over a quarter of a minute. */
+  scorch(at: THREE.Vector3, radius: number, life = 16) {
+    if (!this.scorchTex) {
+      const S = 256;
+      const c = document.createElement('canvas');
+      c.width = c.height = S;
+      const ctx = c.getContext('2d')!;
+      const g = ctx.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
+      g.addColorStop(0, 'rgba(0,0,0,0.9)');
+      g.addColorStop(0.45, 'rgba(0,0,0,0.7)');
+      g.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, S, S);
+      // bitten edges and streaks thrown outward
+      ctx.globalCompositeOperation = 'destination-out';
+      for (let i = 0; i < 90; i++) {
+        const a = Math.random() * Math.PI * 2, r = S * (0.28 + Math.random() * 0.22);
+        ctx.beginPath();
+        ctx.arc(S / 2 + Math.cos(a) * r, S / 2 + Math.sin(a) * r, 4 + Math.random() * 16, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(0,0,0,${0.25 + Math.random() * 0.5})`;
+        ctx.fill();
+      }
+      this.scorchTex = new THREE.CanvasTexture(c);
+    }
+    const mat = new THREE.MeshBasicMaterial({ map: this.scorchTex, color: 0x0a0806, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+    const mesh = new THREE.Mesh(new THREE.CircleGeometry(radius, 24), mat);
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.rotation.z = Math.random() * 6.28;
+    mesh.position.copy(at).setY(at.y + 0.04);
+    mesh.renderOrder = 2;
+    this.addTransient(mesh, life, (t, m) => {
+      (m.material as THREE.MeshBasicMaterial).opacity = 0.85 * Math.min(1, t * 30) * (1 - Math.max(0, (t - 0.6) / 0.4));
+    });
   }
 
   resize(height: number, fovDeg: number) {
@@ -251,24 +356,28 @@ export class Effects {
   // ---- presets ---------------------------------------------------------------------------
 
   explosion(at: THREE.Vector3, radius: number) {
-    this.glow.emit(at, { count: Math.round(40 * radius), color: FX_COLORS.fire, speed: [radius * 1.2, radius * 4], life: [0.25, 0.7], size: [0.5, 1.4], drag: 3, gravity: -2, brightness: 1.6 });
-    this.glow.emit(at, { count: Math.round(14 * radius), color: FX_COLORS.ember, speed: [radius * 2, radius * 6], life: [0.5, 1.3], size: [0.08, 0.2], drag: 1, gravity: 9, brightness: 2.5 });
-    this.dust.emit(at, { count: Math.round(10 * radius), color: FX_COLORS.smoke, speed: [0.5, radius * 1.5], life: [0.8, 1.8], size: [1.2, 2.6], drag: 2, gravity: -1.2, grow: 2.2 });
-    this.flash(at, 0xff8a3a, 60 * radius, 8 + radius * 4, 0.4);
-    this.ring(at, 0xff9a4a, radius * 1.15, 0.4);
+    this.glow.emit(at, { count: Math.round(34 * radius), color: FX_COLORS.fire, speed: [radius * 1.2, radius * 4], life: [0.3, 0.8], size: [0.5, 1.3], drag: 3, gravity: -2.5, brightness: 0.85, fire: true });
+    this.glow.emit(at, { count: Math.round(22 * radius), color: FX_COLORS.ember, speed: [radius * 2.5, radius * 8], life: [0.6, 1.6], size: [0.05, 0.14], drag: 0.8, gravity: 10, brightness: 2.6, fire: true });
+    this.dust.emit(at, { count: Math.round(12 * radius), color: FX_COLORS.smoke, speed: [0.5, radius * 1.6], life: [1.2, 2.6], size: [1.2, 2.6], drag: 2, gravity: -1.4, grow: 2.6, alpha: 0.7 });
+    this.flash(at, 0xff8a3a, 34 * radius, 8 + radius * 4, 0.45);
+    this.ring(at, 0xff9a4a, radius * 1.15, 0.4, 1.1);
+    this.scorch(at, radius * 1.1);
+    this.onBlast?.(at, radius);
   }
 
   embers(at: THREE.Vector3, count = 3) {
-    this.glow.emit(at, { count, color: FX_COLORS.fire, speed: [0.2, 1.2], life: [0.2, 0.5], size: [0.25, 0.6], drag: 2, gravity: -3, brightness: 1.4 });
+    this.glow.emit(at, { count, color: FX_COLORS.fire, speed: [0.2, 1.2], life: [0.25, 0.6], size: [0.22, 0.55], drag: 2, gravity: -3, brightness: 1.2, fire: true });
   }
 
   flames(at: THREE.Vector3, radius: number, count: number) {
-    this.glow.emit(at, { count, color: FX_COLORS.fire, speed: [0.2, 1], life: [0.35, 0.8], size: [0.5, 1.2], radius, flat: 0.1, rise: 2.2, drag: 1.5, gravity: -2, brightness: 1.2 });
+    this.glow.emit(at, { count, color: FX_COLORS.fire, speed: [0.2, 1], life: [0.4, 0.9], size: [0.45, 1.1], radius, flat: 0.1, rise: 2.2, drag: 1.5, gravity: -2.2, brightness: 1.0, fire: true });
+    if (Math.random() < 0.3) this.dust.emit(at, { count: 1, color: FX_COLORS.smoke, speed: [0.1, 0.5], life: [1.5, 2.6], size: [1, 1.8], radius, flat: 0.1, rise: 2.6, drag: 0.6, grow: 2.4, alpha: 0.35 });
   }
 
   rubble(at: THREE.Vector3, amount = 1, up = 5) {
     this.dust.emit(at, { count: Math.round(18 * amount), color: FX_COLORS.stone, speed: [1, 5], life: [0.5, 1.1], size: [0.12, 0.34], gravity: 16, rise: up, grow: 1 });
-    this.dust.emit(at, { count: Math.round(10 * amount), color: FX_COLORS.sand, speed: [0.5, 2.5], life: [0.7, 1.5], size: [1, 2.2], drag: 2.5, gravity: -0.6, grow: 2.4 });
+    this.dust.emit(at, { count: Math.round(10 * amount), color: FX_COLORS.sand, speed: [0.5, 2.5], life: [0.7, 1.5], size: [1, 2.2], drag: 2.5, gravity: -0.6, grow: 2.4, alpha: 0.6 });
+    if (amount >= 1.5) this.onBlast?.(at, amount * 0.5);
   }
 
   gust(at: THREE.Vector3, dir: THREE.Vector3, count = 30, speed = 22) {

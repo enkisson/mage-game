@@ -511,6 +511,11 @@ export class View {
     if (made && spell) this.recoil.kick([0.25 + spell.cost * 0.012]);
   }
 
+  /** The ground or the air jumps: a blast nearby, a heavy cast. No flinch, only the shake. */
+  rumble(amount: number) {
+    this.shake = Math.min(1, this.shake + amount);
+  }
+
   hurt(amount: number) {
     this.shake = Math.min(1, this.shake + 0.25 + amount / 60);
     const k = Math.min(1, 0.4 + amount / 40);

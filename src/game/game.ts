@@ -14,6 +14,7 @@ import { journalProp, sealProp, type JournalProp, type SealProp } from '../world
 import { Player } from '../player/player';
 import { View } from '../player/view';
 import { Enemies, type Enemy } from '../enemies/enemies';
+import { prepareCreatures } from '../art/creatures';
 import { Spells } from '../magic/spells';
 import { Caster } from '../magic/caster';
 import { SIGILS, type SigilId } from '../magic/sigils';
@@ -121,6 +122,7 @@ export class Game {
     this.enemies = new Enemies(this);
     this.spells = new Spells(this);
     this.caster = new Caster(this);
+    prepareCreatures();
 
     for (const def of this.level.journals) {
       const prop = journalProp();
@@ -151,6 +153,10 @@ export class Game {
     this.composer.addPass(this.bloom);
     this.composer.addPass(new OutputPass());
 
+    this.fx.onBlast = (at, power) => {
+      const d = at.distanceTo(this.player.eye);
+      this.view.rumble(Math.min(0.7, (power * 1.6) / (1 + d * d * 0.08)));
+    };
     this.player.onHurt = (amount) => {
       this.hud.hurt();
       this.view.hurt(amount);
@@ -492,8 +498,18 @@ export class Game {
     }
   }
 
+  /** Hold the world still for an instant, so a heavy cast lands with weight. */
+  hitStop(seconds: number) {
+    this.stopped = Math.max(this.stopped, seconds);
+  }
+  private stopped = 0;
+
   private frame(dt: number) {
     this.handleInput();
+    if (this.stopped > 0) {
+      this.stopped -= dt;
+      dt *= 0.06;
+    }
     const simulate = this.mode === 'playing' || this.mode === 'dead';
     if (simulate) {
       this.accumulator += Math.min(dt, 0.1);

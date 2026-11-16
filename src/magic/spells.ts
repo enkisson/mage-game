@@ -143,7 +143,7 @@ export class Spells {
     const stone = e.visual === 'stone';
     const mat = stone
       ? MATERIALS.conjuredStone
-      : new THREE.MeshBasicMaterial({ color: new THREE.Color(e.visual === 'fire' ? 0xffc27a : VISUAL_COLOR[e.visual]).multiplyScalar(2.4) });
+      : new THREE.MeshBasicMaterial({ color: new THREE.Color(e.visual === 'fire' ? 0xffc27a : VISUAL_COLOR[e.visual]).multiplyScalar(1.7) });
     const mesh = new THREE.Mesh(stone ? this.rockGeo : this.boltGeo, mat);
     mesh.scale.setScalar(e.size);
     mesh.position.copy(from);
@@ -152,8 +152,8 @@ export class Spells {
     game.world.scene.add(mesh);
     const bolt: Bolt = { effect: e, mesh, velocity, travelled: 0 };
     if (!stone) {
-      bolt.light = new THREE.PointLight(VISUAL_COLOR[e.visual], 8 + e.size * 40, 9 + e.size * 10, 1.8);
-      mesh.add(bolt.light);
+      bolt.light = game.fx.lamp(VISUAL_COLOR[e.visual], 6 + e.size * 30, 9 + e.size * 10) ?? undefined;
+      if (bolt.light) mesh.add(bolt.light);
     }
     this.bolts.push(bolt);
     game.fx.spark(from, e.visual === 'fire' ? FX_COLORS.fire : e.visual === 'stone' ? FX_COLORS.sand : FX_COLORS.wind, 10, 4);
@@ -196,6 +196,7 @@ export class Spells {
       }
 
       this.land(b, impact ?? to, target, dir);
+      game.fx.unlamp(b.light);
       game.world.scene.remove(b.mesh);
       if (!(b.mesh.material === MATERIALS.conjuredStone)) (b.mesh.material as THREE.Material).dispose();
       this.bolts.splice(i, 1);
@@ -318,10 +319,11 @@ export class Spells {
     if (e.visual === 'fire') {
       // start the fire a stride ahead, so it rolls away from you instead of filling your eyes
       const mouth = hand.clone().addScaledVector(aim, 1.3);
-      game.fx.glow.emit(mouth, { count: 110, color: FX_COLORS.fire, speed: [e.length * 0.9, e.length * 2.3], life: [0.25, 0.6], size: [0.35, 1.0], dir: aim, spread: e.halfAngle, drag: 2.6, gravity: -3, brightness: 1.0, radius: 0.5 });
-      game.fx.glow.emit(hand, { count: 16, color: FX_COLORS.ember, speed: [2, 9], life: [0.2, 0.5], size: [0.05, 0.14], dir: aim, spread: e.halfAngle, drag: 2, brightness: 2 });
+      game.fx.glow.emit(mouth, { count: 90, color: FX_COLORS.fire, speed: [e.length * 0.9, e.length * 2.3], life: [0.3, 0.7], size: [0.35, 1.0], dir: aim, spread: e.halfAngle, drag: 2.6, gravity: -3, brightness: 0.8, fire: true, radius: 0.5 });
+      game.fx.glow.emit(hand, { count: 30, color: FX_COLORS.ember, speed: [4, 16], life: [0.3, 0.9], size: [0.04, 0.11], dir: aim, spread: e.halfAngle, drag: 1.6, gravity: 5, brightness: 2.2, fire: true });
       game.fx.dust.emit(mouth, { count: 20, color: FX_COLORS.smoke, speed: [e.length * 0.5, e.length * 1.4], life: [0.6, 1.2], size: [1, 2.4], dir: aim, spread: e.halfAngle, drag: 2.4, gravity: -1, grow: 2.4 });
-      game.fx.flash(hand.clone().addScaledVector(aim, 4), 0xff8a3a, 45, 16, 0.4);
+      game.fx.flash(hand.clone().addScaledVector(aim, 4), 0xff8a3a, 30, 16, 0.45);
+      game.fx.onBlast?.(hand, 1.2);
     } else if (e.visual === 'stone') {
       // spikes erupt in a line, a beat apart
       const n = Math.ceil(e.length / 1.6);
@@ -365,7 +367,8 @@ export class Spells {
     game.fx.ring(feet, 0xb69cff, e.radius, 0.5, 2);
     game.fx.ring(feet, 0xe6dcff, e.radius * 0.7, 0.35, 1.2);
     game.fx.dust.emit(feet, { count: 70, color: FX_COLORS.sand, speed: [e.radius * 0.8, e.radius * 2.2], life: [0.4, 0.9], size: [0.5, 1.5], dir: new THREE.Vector3(0, 1, 0), spread: Math.PI / 2 * 1.02, drag: 3, radius: 0.8, flat: 0.05, grow: 2.2 });
-    game.fx.flash(c, 0xb69cff, 60, 14, 0.35);
+    game.fx.flash(c, 0xb69cff, 36, 14, 0.35);
+    game.fx.onBlast?.(c, 2.2);
     if (any) game.hud.hitMarker();
     return null;
   }
@@ -399,9 +402,8 @@ export class Spells {
       game.fx.rubble(at, 1.5, 3);
     }
     if (zone.visual === 'magma' || zone.visual === 'fire') {
-      z.light = new THREE.PointLight(0xff7a2a, 26, zone.radius * 4, 1.8);
-      z.light.position.copy(at).setY(at.y + 1.2);
-      game.world.scene.add(z.light);
+      z.light = game.fx.lamp(0xff7a2a, 22, zone.radius * 4) ?? undefined;
+      z.light?.position.copy(at).setY(at.y + 1.2);
     }
     if (zone.visual === 'sand') game.fx.ring(at, 0xd9a35a, zone.radius, 0.6, 0.7);
     this.zones.push(z);
@@ -426,7 +428,7 @@ export class Spells {
         game.fx.flames(z.at, r * 0.9, z.zone.visual === 'magma' ? 2 : 4);
       }
       if (z.mesh) (z.mesh.material as THREE.MeshBasicMaterial).opacity = 0.9 * fade;
-      if (z.light) z.light.intensity = 26 * fade * (0.85 + Math.random() * 0.3);
+      if (z.light) z.light.intensity = 22 * fade * (0.85 + Math.random() * 0.3);
 
       if (z.tick <= 0) {
         z.tick = 0.25;
@@ -437,7 +439,7 @@ export class Spells {
       }
       if (z.life <= 0) {
         if (z.mesh) { game.world.scene.remove(z.mesh); (z.mesh.material as THREE.Material).dispose(); z.mesh.geometry.dispose(); }
-        if (z.light) game.world.scene.remove(z.light);
+        game.fx.unlamp(z.light);
         this.zones.splice(i, 1);
       }
     }
@@ -581,10 +583,10 @@ export class Spells {
   /** Remove everything conjured (on death, or when the level resets). */
   clear() {
     const { game } = this;
-    for (const b of this.bolts) game.world.scene.remove(b.mesh);
+    for (const b of this.bolts) { this.game.fx.unlamp(b.light); this.game.world.scene.remove(b.mesh); }
     for (const z of this.zones) {
       if (z.mesh) game.world.scene.remove(z.mesh);
-      if (z.light) game.world.scene.remove(z.light);
+      this.game.fx.unlamp(z.light);
     }
     for (const p of this.pillars) {
       game.world.scene.remove(p.mesh);
