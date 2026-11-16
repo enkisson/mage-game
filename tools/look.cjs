@@ -1,0 +1,76 @@
+// Drive the built game in headless Chromium and take screenshots, for checking changes without a GPU.
+// Usage: npm run build && node tools/look.cjs <outDir> [scenario ...]
+const http = require('http');
+const fs = require('fs');
+const path = require('path');
+const { chromium } = require('playwright');
+
+const dist = path.join(__dirname, '..', 'dist');
+const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.woff2': 'font/woff2', '.woff': 'font/woff', '.png': 'image/png', '.jpg': 'image/jpeg', '.hdr': 'application/octet-stream', '.glb': 'model/gltf-binary' };
+
+// Each scenario runs inside the page with `g` = the game.
+const SCENARIOS = {
+  title: `void 0`,
+  wake: `g.debug.start(); g.debug.advance(0.5);`,
+  beach: `g.debug.start(); g.debug.teleport(6, 14, 0.5, -0.02); g.debug.advance(0.3);`,
+  wreck: `g.debug.start(); g.debug.teleport(2, 6, 1.2, 0.05); g.debug.advance(0.3);`,
+  ravine: `g.debug.start(); g.debug.teleport(0, -24, 0, 0); g.debug.advance(0.3);`,
+  cove: `g.debug.start(); g.debug.learnAll(); g.debug.teleport(-6, -50, 0.1, -0.05); g.debug.advance(4.2);`,
+  mesa: `g.debug.start(); g.debug.learnAll(); g.debug.teleport(13, -82, 2.4, -0.3); g.debug.advance(6);`,
+  fireball: `g.debug.start(); g.debug.learnAll(); g.debug.teleport(0, -56, 0, -0.08);
+    for (const [x, z] of [[-2, -66], [1, -67], [3, -65], [0, -69]]) g.debug.spawn('drowned', x, z);
+    g.debug.advance(1.4); g.debug.lookAt(0.5, 5.6, -66.5); g.debug.say('fire', 'fire'); g.debug.advance(0.5);`,
+  pillar: `g.debug.start(); g.debug.learnAll(); g.debug.teleport(8, -64, 0.3, -1.2); g.debug.advance(0.2);
+    g.debug.say('stone', 'stone'); g.debug.advance(1.2); g.player.pitch = -0.25; g.debug.spawn('drowned', 4, -70); g.debug.spawn('drowned', 6, -72); g.debug.advance(3);`,
+  wave: `g.debug.start(); g.debug.learnAll(); g.debug.teleport(0, -58, 0, -0.1);
+    for (const [x, z] of [[-2, -64], [1, -65], [3, -63]]) g.debug.spawn('drowned', x, z);
+    g.debug.advance(1.6); g.debug.say('fire', 'push'); g.debug.advance(0.22);`,
+  journal: `g.debug.start(); g.debug.teleport(4.4, 23.6, -0.6, -0.5); g.debug.advance(0.3); g.input.inject('key', 'KeyE'); g.debug.advance(0.1);`,
+};
+
+const args = process.argv.slice(2);
+const outDir = path.resolve(args.shift() || 'shots');
+const names = args.length ? args : Object.keys(SCENARIOS);
+const size = { width: 1280, height: 720 };
+
+const server = http.createServer((req, res) => {
+  let file = path.join(dist, decodeURIComponent(req.url.split('?')[0]));
+  if (file.endsWith(path.sep) || !path.extname(file)) file = path.join(file, 'index.html');
+  fs.readFile(file, (err, data) => {
+    if (err) { res.writeHead(404); return res.end(); }
+    res.writeHead(200, { 'content-type': TYPES[path.extname(file)] || 'application/octet-stream' });
+    res.end(data);
+  });
+});
+
+server.listen(0, async () => {
+  const port = server.address().port;
+  const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
+  fs.mkdirSync(outDir, { recursive: true });
+  let failed = false;
+  for (const name of names) {
+    const page = await browser.newPage({ viewport: size });
+    const errors = [];
+    page.on('pageerror', (e) => errors.push(e.message));
+    page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+    await page.addInitScript(() => { try { localStorage.clear(); } catch {} });
+    await page.goto(`http://127.0.0.1:${port}/`);
+    await page.waitForFunction('window.gloam !== undefined', null, { timeout: 60000 }).catch(() => errors.push('game never started'));
+    await page.waitForTimeout(1500); // textures and sky
+    const t = Date.now();
+    try {
+      const info = await page.evaluate(`(() => { const g = window.gloam; ${SCENARIOS[name]}; g.debug.advance(0);
+        return { pos: g.player.position.toArray().map((n) => +n.toFixed(2)), hp: Math.round(g.player.health), focus: Math.round(g.player.focus), foes: g.enemies.list.map((e) => e.kind + ':' + Math.round(e.hp)).join(' '), mode: g.mode }; })()`);
+      console.log(name, JSON.stringify(info), `${Date.now() - t} ms`);
+    } catch (e) {
+      errors.push(String(e.message || e));
+    }
+    await page.waitForTimeout(200);
+    await page.screenshot({ path: path.join(outDir, `${name}.jpg`), type: 'jpeg', quality: 85 });
+    if (errors.length) { failed = true; console.log(`  [${name}] errors:\n   ` + [...new Set(errors)].join('\n   ')); }
+    await page.close();
+  }
+  await browser.close();
+  server.close();
+  process.exit(failed ? 1 : 0);
+});
