@@ -150,7 +150,7 @@ export class Game {
     this.resize();
 
     this.player.spawn(this.level.spawn.position, this.level.spawn.yaw);
-    this.hud.setKeys(this.knowledge);
+    this.syncKeys();
     this.hud.setMaxWords(this.caster.maxWords);
     this.hud.showTitle(this.knowledge, () => this.begin());
     this.view.update(0, this.player, false);
@@ -160,6 +160,12 @@ export class Game {
     void loadTextures(assets, this.renderer.capabilities.getMaxAnisotropy());
     this.handsReady = this.view.loadHands(assets + 'hands/');
     void loadPhotoSky(scene, this.renderer, this.sky, { url: assets + 'sky/night.jpg', rotation: 2.2, backgroundIntensity: 0.26, lightIntensity: 0.5, fog: 0x211f2b });
+  }
+
+  /** The HUD keys and the marks on the hands both show which sigils are bound. */
+  private syncKeys() {
+    this.hud.setKeys(this.knowledge);
+    this.view.setBound(this.knowledge.bound);
   }
 
   // ---- flow --------------------------------------------------------------------------------
@@ -202,13 +208,13 @@ export class Game {
       learnAll: () => {
         for (const id of ['fire', 'push', 'stone', 'wind'] as SigilId[]) learnSigil(this.knowledge, id);
         saveKnowledge(this.knowledge);
-        this.hud.setKeys(this.knowledge);
+        this.syncKeys();
         this.pause();
       },
       forget: () => {
         this.knowledge = emptyKnowledge();
         saveKnowledge(this.knowledge);
-        this.hud.setKeys(this.knowledge);
+        this.syncKeys();
         for (const j of this.journals) j.prop.setRead(false);
         this.respawn();
         this.pause();
@@ -247,7 +253,7 @@ export class Game {
     if (!this.knowledge.journals.includes(def.id)) this.knowledge.journals.push(def.id);
     saveKnowledge(this.knowledge);
     this.journals.find((j) => j.def === def)?.prop.setRead(true);
-    this.hud.setKeys(this.knowledge);
+    this.syncKeys();
     this.caster.drop();
     this.reading = def;
     this.mode = 'reading';
@@ -534,7 +540,7 @@ export class Game {
     },
     learnAll: () => {
       for (const id of ['fire', 'push', 'stone', 'wind'] as SigilId[]) learnSigil(this.knowledge, id);
-      this.hud.setKeys(this.knowledge);
+      this.syncKeys();
     },
     teleport: (x: number, z: number, yaw?: number, pitch?: number) => {
       const y = this.world.groundAt(x, z) ?? 0;

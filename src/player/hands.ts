@@ -77,6 +77,8 @@ export class HandRig {
   /** Centre of the palm and of the back of the hand, in the hand's frame. */
   readonly palm = new THREE.Vector3(0, 0.07, 0.02);
   readonly back = new THREE.Vector3(0, 0.07, -0.016);
+  /** A spot on the back of the hand behind each knuckle (index to pinky), for the sigil marks. */
+  readonly knuckles: THREE.Vector3[] = [];
   private thumb: Joint[] = [];
   private fingers: Joint[][] = [];
   private sign: number;
@@ -140,6 +142,10 @@ export class HandRig {
     holder.add(scene);
     holder.applyMatrix4(inv);
     this.root.add(holder);
+    for (const f of FINGERS) {
+      const k = p(`${f}-phalanx-proximal`).applyMatrix4(inv);
+      this.knuckles.push(new THREE.Vector3(k.x, k.y - 0.024, k.z - 0.0125));
+    }
     this.root.traverse((o) => { o.userData.noCollide = true; });
   }
 

@@ -48,6 +48,13 @@ const _shape = new Float32Array(16);
 
 interface Glyph { sprite: THREE.Sprite; age: number; leaving: number; cast: boolean; from: THREE.Vector3 }
 
+/** A sigil marked on the back of the hand. It smoulders while known and flares when spoken. */
+interface Mark { mesh: THREE.Mesh; id: SigilId; heat: number }
+
+const markGeo = new THREE.PlaneGeometry(0.019, 0.019);
+const MARK_DIM = 0.3;
+const MARK_LIT = 3.2;
+
 class Arm {
   readonly holder = new THREE.Group();
   readonly forearm = buildForearm();
@@ -60,6 +67,7 @@ class Arm {
   held: SigilId | null = null;
   heldAge = 0;
   glyph: Glyph | null = null;
+  marks: Mark[] = [];
   /** Where the held sigil floats, in camera space. */
   readonly glyphAt = new THREE.Vector3();
 
@@ -77,6 +85,30 @@ class Arm {
     this.holder.add(rig.root);
     this.holder.visible = true;
     this.forearm.visible = true;
+  }
+
+  /** Put the four bound sigils on the back of the hand, one behind each knuckle. */
+  setMarks(bound: (SigilId | null)[]) {
+    if (!this.rig) return;
+    for (const m of this.marks) {
+      this.rig.root.remove(m.mesh);
+      (m.mesh.material as THREE.Material).dispose();
+    }
+    this.marks = [];
+    bound.forEach((id, i) => {
+      if (!id) return;
+      const mat = new THREE.MeshBasicMaterial({
+        map: glyphTexture(id), color: new THREE.Color(SIGILS[id].color).multiplyScalar(MARK_DIM), transparent: true,
+        blending: THREE.AdditiveBlending, depthWrite: false, fog: false, polygonOffset: true, polygonOffsetFactor: -4,
+      });
+      const mesh = new THREE.Mesh(markGeo, mat);
+      mesh.position.copy(this.rig!.knuckles[i]);
+      // faces out of the back of the hand, reading upright toward the fingers
+      mesh.rotation.set(0, Math.PI, 0);
+      mesh.userData.noCollide = true;
+      this.rig!.root.add(mesh);
+      this.marks.push({ mesh, id, heat: 0 });
+    });
   }
 
   aim(pose: ArmPose, ease: number) {
@@ -121,6 +153,12 @@ class Arm {
       }
       this.rig.setShape(_shape);
     }
+    for (const m of this.marks) {
+      const want = this.held === m.id ? 1 : 0;
+      m.heat += (want - m.heat) * Math.min(1, dt * (want ? 14 : 3));
+      const pulse = this.held === m.id ? 0.85 + Math.sin(clock * 7) * 0.15 : 1;
+      (m.mesh.material as THREE.MeshBasicMaterial).color.set(SIGILS[m.id].color).multiplyScalar((MARK_DIM + (MARK_LIT - MARK_DIM) * m.heat) * pulse);
+    }
     this.heldAge += dt;
     const want = this.held ? 0.06 : 0;
     this.light.intensity += (want - this.light.intensity) * Math.min(1, dt * 10);
@@ -164,7 +202,17 @@ export class View {
     if (!hands) return false;
     this.left.attach(hands.left);
     this.right.attach(hands.right);
+    this.setBound(this.bound);
     return true;
+  }
+
+  private bound: (SigilId | null)[] = [null, null, null, null];
+
+  /** Tell the hands which sigils are bound to the arrow keys, so their marks can be drawn. */
+  setBound(bound: (SigilId | null)[]) {
+    this.bound = [...bound];
+    this.left.setMarks(this.bound);
+    this.right.setMarks(this.bound);
   }
 
   private arm(index: number): Arm {
