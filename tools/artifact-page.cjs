@@ -1,5 +1,6 @@
 // Writes dist/play.html: the built game as a page fragment for hosts that supply their own
 // <html> shell, plus dist/play-files.json listing every file the page needs beside it.
+// Models are packed into JSON, because such hosts tend not to serve .glb files.
 // Usage: npm run build && node tools/artifact-page.cjs
 const fs = require('fs');
 const path = require('path');
@@ -17,6 +18,7 @@ fs.writeFileSync(path.join(dist, 'play.html'), `<title>Gloamtide</title>
   body { background: #05040c; color: #e2dbc6; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
 </style>
 <div id="game"></div>
+<script>window.GLOAM_PACKED = true;</script>
 <script type="module" src="${js[1]}"></script>
 `);
 
@@ -25,7 +27,11 @@ const walk = (dir) => {
   for (const name of fs.readdirSync(dir)) {
     const full = path.join(dir, name);
     if (fs.statSync(full).isDirectory()) walk(full);
-    else if (!name.endsWith('.md') && !name.endsWith('.woff')) files.push(path.relative(dist, full).split(path.sep).join('/'));
+    else if (name.endsWith('.glb')) {
+      // this host does not serve .glb, so each model travels as base64 inside a JSON file
+      fs.writeFileSync(full + '.json', JSON.stringify({ data: fs.readFileSync(full).toString('base64') }));
+      files.push(path.relative(dist, full + '.json').split(path.sep).join('/'));
+    } else if (!name.endsWith('.md') && !name.endsWith('.woff') && !name.endsWith('.glb.json')) files.push(path.relative(dist, full).split(path.sep).join('/'));
   }
 };
 walk(path.join(dist, 'assets'));

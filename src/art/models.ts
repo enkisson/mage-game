@@ -1,7 +1,7 @@
 // Scanned models (Poly Haven, CC0), loaded once and cloned wherever the level needs them.
 // Every model is optional: if a file is missing the level falls back to shapes built in code.
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { loadGlb } from './gltf';
 import { ConvexGeometry } from 'three/addons/geometries/ConvexGeometry.js';
 
 export type ModelName = 'ship' | 'boulder' | 'slab' | 'crate' | 'barrels' | 'branches' | 'hand';
@@ -92,12 +92,11 @@ export function centred(src: THREE.Mesh): THREE.Mesh {
 
 export async function loadModels(base: string, anisotropy: number, onProgress: (done: number, total: number) => void): Promise<Models> {
   const models = new Models();
-  const loader = new GLTFLoader();
   const names = Object.keys(FILES) as ModelName[];
   let done = 0;
   await Promise.all(names.map(async (name) => {
     try {
-      const gltf = await loader.loadAsync(`${base}${FILES[name]}.glb`);
+      const gltf = await loadGlb(`${base}${FILES[name]}.glb`);
       gltf.scene.traverse((o) => {
         const m = o as THREE.Mesh;
         if (!m.isMesh) return;

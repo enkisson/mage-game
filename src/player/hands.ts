@@ -4,7 +4,7 @@
 // A hand lives in its own frame: wrist at the origin, fingers along +Y, palm facing +Z,
 // thumb toward +X on the right hand and -X on the left.
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { loadGlb } from '../art/gltf';
 import { MATERIALS } from '../art/materials';
 
 export type Side = 'left' | 'right';
@@ -203,9 +203,8 @@ function tintSkin(mesh: THREE.SkinnedMesh, base: THREE.Color) {
 
 /** Load both hands. Resolves null if the model files are missing. */
 export async function loadHands(base: string, skinTone = 0xa9795a): Promise<{ left: HandRig; right: HandRig } | null> {
-  const loader = new GLTFLoader();
   try {
-    const [l, r] = await Promise.all([loader.loadAsync(base + 'left.glb'), loader.loadAsync(base + 'right.glb')]);
+    const [l, r] = await Promise.all([loadGlb(base + 'left.glb'), loadGlb(base + 'right.glb')]);
     const material = skinMaterial();
     const left = new HandRig(l.scene, 'left', material);
     const right = new HandRig(r.scene, 'right', material);
