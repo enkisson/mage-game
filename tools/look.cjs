@@ -10,8 +10,9 @@ const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/cs
 
 // Each scenario runs inside the page with `g` = the game.
 const SCENARIOS = {
-  title: `void 0`,
+  title: `g.debug.render()`,
   wake: `g.debug.start(); g.debug.advance(0.5);`,
+  sea: `g.debug.start(); g.debug.teleport(-4, 18, 2.6, -0.06); g.debug.advance(0.3);`,
   beach: `g.debug.start(); g.debug.teleport(6, 14, 0.5, -0.02); g.debug.advance(0.3);`,
   wreck: `g.debug.start(); g.debug.teleport(2, 6, 1.2, 0.05); g.debug.advance(0.3);`,
   ravine: `g.debug.start(); g.debug.teleport(0, -24, 0, 0); g.debug.advance(0.3);`,
@@ -56,17 +57,17 @@ server.listen(0, async () => {
     await page.addInitScript(() => { try { localStorage.clear(); } catch {} });
     await page.goto(`http://127.0.0.1:${port}/`);
     await page.waitForFunction('window.gloam !== undefined', null, { timeout: 60000 }).catch(() => errors.push('game never started'));
-    await page.waitForTimeout(1500); // textures and sky
+    await page.waitForTimeout(2500); // textures and sky
     const t = Date.now();
     try {
-      const info = await page.evaluate(`(() => { const g = window.gloam; ${SCENARIOS[name]}; g.debug.advance(0);
+      const info = await page.evaluate(`(() => { const g = window.gloam; ${SCENARIOS[name]}; g.debug.render();
         return { pos: g.player.position.toArray().map((n) => +n.toFixed(2)), hp: Math.round(g.player.health), focus: Math.round(g.player.focus), foes: g.enemies.list.map((e) => e.kind + ':' + Math.round(e.hp)).join(' '), mode: g.mode }; })()`);
       console.log(name, JSON.stringify(info), `${Date.now() - t} ms`);
     } catch (e) {
       errors.push(String(e.message || e));
     }
     await page.waitForTimeout(200);
-    await page.screenshot({ path: path.join(outDir, `${name}.jpg`), type: 'jpeg', quality: 85 });
+    await page.screenshot({ path: path.join(outDir, `${name}.jpg`), type: 'jpeg', quality: 85, timeout: 180000 });
     if (errors.length) { failed = true; console.log(`  [${name}] errors:\n   ` + [...new Set(errors)].join('\n   ')); }
     await page.close();
   }

@@ -42,7 +42,7 @@ html, body { margin: 0; height: 100%; background: #05040c; overflow: hidden; }
 @keyframes struck { from { opacity: 1; } to { opacity: 0; } }
 
 .prompt { position: absolute; left: 50%; top: calc(50% + 54px); transform: translateX(-50%); display: flex; align-items: center; gap: 10px; font-size: 19px; font-weight: 500; white-space: nowrap; }
-.prompt kbd, .keys-help kbd { font: 700 14px var(--ui); letter-spacing: 0.06em; padding: 2px 8px; background: var(--night); color: var(--bone); border: 1px solid rgba(226, 219, 198, 0.45); border-radius: 3px; }
+.prompt kbd, .keys-help kbd, .page kbd { font: 700 14px var(--ui); letter-spacing: 0.06em; padding: 2px 8px; background: var(--night); color: var(--bone); border: 1px solid rgba(226, 219, 198, 0.45); border-radius: 3px; }
 .whisper { position: absolute; left: 50%; top: calc(50% + 96px); transform: translateX(-50%); font-size: 18px; color: var(--bone-dim); font-style: italic; opacity: 0; transition: opacity 0.6s; white-space: nowrap; }
 .whisper.on { opacity: 1; transition: none; }
 
@@ -69,7 +69,7 @@ html, body { margin: 0; height: 100%; background: #05040c; overflow: hidden; }
 @keyframes named { from { opacity: 1; transform: translateY(0); } to { opacity: 0; transform: translateY(-14px); } }
 .sentence { display: flex; gap: 8px; height: 56px; align-items: center; }
 .sentence.shake { animation: shake 0.3s; }
-.word { width: 52px; height: 52px; display: grid; place-items: center; border: 1px dashed rgba(226, 219, 198, 0.22); clip-path: polygon(8px 0, calc(100% - 8px) 0, 100% 8px, 100% calc(100% - 8px), calc(100% - 8px) 100%, 8px 100%, 0 calc(100% - 8px), 0 8px); }
+.word { width: 52px; height: 52px; display: grid; place-items: center; border: 1px dashed rgba(226, 219, 198, 0.4); background: rgba(10, 8, 26, 0.35); clip-path: polygon(8px 0, calc(100% - 8px) 0, 100% 8px, 100% calc(100% - 8px), calc(100% - 8px) 100%, 8px 100%, 0 calc(100% - 8px), 0 8px); }
 .word.locked { opacity: 0.35; }
 .word.said { border: 2px solid var(--c); background: linear-gradient(180deg, color-mix(in srgb, var(--c) 28%, #17133a), #0d0b22); box-shadow: inset 0 0 16px color-mix(in srgb, var(--c) 40%, transparent); color: var(--c); animation: said 0.18s ease-out; }
 .word svg { width: 32px; height: 32px; filter: drop-shadow(0 0 6px var(--c)); }

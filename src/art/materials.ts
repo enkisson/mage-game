@@ -90,17 +90,50 @@ function groundMaterial(): THREE.MeshStandardMaterial {
   return m;
 }
 
+/** A tileable ripple normal map, built from a handful of sine waves so it wraps exactly. */
+function rippleNormals(size = 256): THREE.DataTexture {
+  const waves = [[1, 2, 0.5, 0.3], [-2, 3, 0.3, 1.7], [4, -1, 0.22, 2.9], [5, 6, 0.12, 0.4], [-7, 4, 0.1, 4.1], [9, -8, 0.06, 5.3]];
+  const data = new Uint8Array(size * size * 4);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const u = x / size, v = y / size;
+      let dx = 0, dy = 0;
+      for (const [kx, ky, amp, phase] of waves) {
+        const c = Math.cos(Math.PI * 2 * (kx * u + ky * v) + phase) * amp;
+        dx += c * kx;
+        dy += c * ky;
+      }
+      const n = new THREE.Vector3(-dx * 0.22, -dy * 0.22, 1).normalize();
+      const i = (y * size + x) * 4;
+      data[i] = (n.x * 0.5 + 0.5) * 255;
+      data[i + 1] = (n.y * 0.5 + 0.5) * 255;
+      data[i + 2] = (n.z * 0.5 + 0.5) * 255;
+      data[i + 3] = 255;
+    }
+  }
+  const tex = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.magFilter = THREE.LinearFilter;
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.generateMipmaps = true;
+  tex.repeat.set(70, 70);
+  tex.needsUpdate = true;
+  return tex;
+}
+
+export const waterRipples = rippleNormals();
+
 export const MATERIALS = {
   ground: groundMaterial(),
   rock: new THREE.MeshStandardMaterial({ color: 0x57535a, roughness: 0.92 }),
   wood: new THREE.MeshStandardMaterial({ color: 0x6b5644, roughness: 0.9 }),
   woodDark: new THREE.MeshStandardMaterial({ color: 0x3d3129, roughness: 0.92 }),
-  cloth: new THREE.MeshStandardMaterial({ color: 0x1c2748, roughness: 0.95 }),
-  skin: new THREE.MeshStandardMaterial({ color: 0xb98c6e, roughness: 0.7 }),
+  cloth: new THREE.MeshStandardMaterial({ color: 0x10141f, roughness: 1 }),
+  skin: new THREE.MeshStandardMaterial({ color: 0x9a7359, roughness: 0.62 }),
   linen: new THREE.MeshStandardMaterial({ color: 0x8f8672, roughness: 0.95 }),
   leather: new THREE.MeshStandardMaterial({ color: 0x3a2b22, roughness: 0.8 }),
   conjuredStone: new THREE.MeshStandardMaterial({ color: 0x77706a, roughness: 0.9, emissive: 0xd9a35a, emissiveIntensity: 0.05 }),
-  water: new THREE.MeshStandardMaterial({ color: 0x0a1a24, roughness: 0.08, metalness: 0.2, transparent: true, opacity: 0.9 }),
+  water: new THREE.MeshStandardMaterial({ color: 0x0b1820, roughness: 0.1, metalness: 0.35, transparent: true, opacity: 0.93, normalMap: waterRipples, normalScale: new THREE.Vector2(0.55, 0.55), envMapIntensity: 1.6 }),
 };
 
 function prep(tex: THREE.Texture, srgb: boolean, anisotropy: number) {

@@ -163,7 +163,7 @@ export class Hud {
 
   discovery(spell: SpellDef) {
     this.named(spell);
-    this.toast('A sentence of your own', spell.name, spell.text, spell.words);
+    this.toast(spell.authored ? 'A sentence from the journal' : 'A sentence of your own', spell.name, spell.text, spell.words);
   }
 
   toast(kicker: string, title: string, text: string, words: SigilId[] = []) {

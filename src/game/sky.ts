@@ -1,7 +1,6 @@
 // Sky, light and fog for a night. Uses an HDR sky photo when one is present, and a painted
 // gradient when it is not.
 import * as THREE from 'three';
-import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
 
 export interface NightSky {
   /** Key light that casts shadows; the game keeps it centred on the player. */
@@ -9,6 +8,8 @@ export interface NightSky {
   /** Direction the key light comes from. */
   keyDir: THREE.Vector3;
   update(camera: THREE.Camera): void;
+  /** A photographed sky has taken over: hide the painted one and ease off the fill light. */
+  usePhoto(): void;
 }
 
 export interface SkyOptions {
@@ -89,29 +90,47 @@ export function createSky(scene: THREE.Scene, o: SkyOptions): NightSky {
     update(camera) {
       dome.position.copy(camera.position);
     },
+    usePhoto() {
+      dome.visible = false;
+      hemi.intensity *= 0.35;
+    },
   };
 }
 
+export interface PhotoSky {
+  /** The sky photograph (an equirectangular JPEG). */
+  url: string;
+  /** Turn the photograph so its bright side faces this compass angle (radians about Y). */
+  rotation: number;
+  /** How bright the visible sky is, and how strongly it lights the world. */
+  backgroundIntensity: number;
+  lightIntensity: number;
+  /** Fog takes this colour so distant ground melts into the horizon. */
+  fog: number;
+}
+
 /**
- * Swap the painted sky for an HDR photograph, which also lights the scene.
+ * Swap the painted sky for a photographed one, which also lights the scene.
  * Resolves false if the file is missing, leaving the painted sky in place.
  */
-export function loadHdrSky(scene: THREE.Scene, renderer: THREE.WebGLRenderer, url: string, intensity: number, rotationY: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    new RGBELoader().load(
-      url,
-      (tex) => {
-        tex.mapping = THREE.EquirectangularReflectionMapping;
-        const pmrem = new THREE.PMREMGenerator(renderer);
-        const env = pmrem.fromEquirectangular(tex).texture;
-        pmrem.dispose();
-        scene.environment = env;
-        scene.environmentIntensity = intensity;
-        scene.environmentRotation.y = rotationY;
-        resolve(true);
-      },
-      undefined,
-      () => resolve(false),
-    );
+export async function loadPhotoSky(scene: THREE.Scene, renderer: THREE.WebGLRenderer, sky: NightSky, o: PhotoSky): Promise<boolean> {
+  const view = await new Promise<THREE.Texture | null>((resolve) => {
+    new THREE.TextureLoader().load(o.url, (t) => resolve(t), undefined, () => resolve(null));
   });
+  if (!view) return false;
+  view.mapping = THREE.EquirectangularReflectionMapping;
+  view.colorSpace = THREE.SRGBColorSpace;
+
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  scene.environment = pmrem.fromEquirectangular(view).texture;
+  pmrem.dispose();
+  scene.environmentIntensity = o.lightIntensity;
+  scene.environmentRotation.y = o.rotation;
+
+  scene.background = view;
+  scene.backgroundIntensity = o.backgroundIntensity;
+  scene.backgroundRotation.y = o.rotation;
+  (scene.fog as THREE.FogExp2).color.set(o.fog);
+  sky.usePhoto();
+  return true;
 }

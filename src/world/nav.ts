@@ -215,12 +215,30 @@ export class NavGrid {
     return c >= 0 ? this.height[c] : NaN;
   }
 
+  /** Can a creature walk the straight line between two points without meeting a cliff or a wall? */
+  private clearWalk(x0: number, z0: number, x1: number, z1: number): boolean {
+    const d = Math.hypot(x1 - x0, z1 - z0);
+    const n = Math.max(1, Math.ceil(d / (this.opts.cell * 0.4)));
+    let prev = this.index(x0, z0);
+    if (prev < 0) return false;
+    for (let s = 1; s <= n; s++) {
+      const c = this.index(x0 + ((x1 - x0) * s) / n, z0 + ((z1 - z0) * s) / n);
+      if (c < 0) return false;
+      if (c !== prev) {
+        if (!this.canStep(prev, c)) return false;
+        prev = c;
+      }
+    }
+    return true;
+  }
+
   /**
-   * Which way should a creature at (x, z) walk? Writes a unit direction into `out` and returns
-   * true, or returns false if it has nowhere to go. Follows the route to the player if there is
-   * one, otherwise the route to the nearest ground beside the player.
+   * Where should a creature at (x, z) walk to next? Writes the centre of a nearby cell on its
+   * route into `out` and returns true, or returns false if it has nowhere to go. Follows the
+   * route to the player if there is one, otherwise the route to the nearest ground beside the
+   * player. Looks a few cells ahead, but only as far as the creature could walk in a straight line.
    */
-  direction(x: number, z: number, out: { x: number; z: number }, lookAhead = 3): boolean {
+  waypoint(x: number, z: number, out: { x: number; z: number }, lookAhead = 3): boolean {
     let i = this.col(x), j = this.row(z);
     if (!this.inside(i, j)) return false;
     let cell = j * this.cols + i;
@@ -230,7 +248,7 @@ export class NavGrid {
       field = this.near;
       if (!(field[cell] < Infinity)) return false;
     }
-    let tx = x, tz = z, moved = false;
+    let found = false;
     for (let step = 0; step < lookAhead; step++) {
       let best = -1, bestCost = field[cell], bi = 0, bj = 0;
       for (const [di, dj, len] of NEIGHBOURS) {
@@ -245,15 +263,22 @@ export class NavGrid {
         }
       }
       if (best < 0) break;
+      const cx = this.cellX(bi), cz = this.cellZ(bj);
+      if (found && !this.clearWalk(x, z, cx, cz)) break;
       i = bi;
       j = bj;
       cell = best;
-      tx = this.cellX(i);
-      tz = this.cellZ(j);
-      moved = true;
+      out.x = cx;
+      out.z = cz;
+      found = true;
     }
-    if (!moved) return false;
-    const dx = tx - x, dz = tz - z;
+    return found;
+  }
+
+  /** Unit direction toward the next waypoint. Convenience for callers that do not keep one. */
+  direction(x: number, z: number, out: { x: number; z: number }, lookAhead = 3): boolean {
+    if (!this.waypoint(x, z, out, lookAhead)) return false;
+    const dx = out.x - x, dz = out.z - z;
     const d = Math.hypot(dx, dz);
     if (d < 1e-4) return false;
     out.x = dx / d;

@@ -8,7 +8,7 @@ import { makeDrowned, makeSpitter, type CreatureModel, type Pose } from '../art/
 import { FX_COLORS } from '../fx/effects';
 
 const GRAVITY = 22;
-const STEP_UP = 0.75;
+const STEP_UP = 0.9;
 /** Landing or hitting a wall faster than this hurts. */
 const SAFE_IMPACT = 10;
 const FALL_DAMAGE = 7;
@@ -59,6 +59,8 @@ export class Enemy {
   private slowTime = 0;
   private slowFactor = 1;
   private strafe = Math.random() < 0.5 ? 1 : -1;
+  /** The spot on its route this creature is walking to, and how long it has been trying. */
+  private way = { x: 0, z: 0, age: 99 };
   private baseScale = 1;
 
   constructor(readonly kind: EnemyKind, at: THREE.Vector3, seed: number) {
@@ -80,7 +82,7 @@ export class Enemy {
   hurt(amount: number, game: Game, kind: 'hit' | 'burn' | 'fall' = 'hit') {
     if (!this.alive || amount <= 0) return;
     this.hp -= amount;
-    this.flashT = 0.18;
+    if (kind !== 'burn') this.flashT = 0.18;
     if (kind === 'burn') {
       this.burnShown += amount;
       if (this.burnShown >= 6) {
@@ -266,6 +268,29 @@ export class Enemy {
     }
   }
 
+  /**
+   * Walk the route toward the player. Commits to one waypoint at a time so the creature does
+   * not dither where the route bends. Returns false if there is no route at all.
+   */
+  private route(dt: number, game: Game, out: { x: number; z: number }): boolean {
+    const p = this.position;
+    this.way.age += dt;
+    const reached = Math.hypot(this.way.x - p.x, this.way.z - p.z) < 0.4;
+    if (reached || this.way.age > 0.9) {
+      if (!game.nav.waypoint(p.x, p.z, this.way)) {
+        this.way.age = 99;
+        return false;
+      }
+      this.way.age = 0;
+    }
+    const dx = this.way.x - p.x, dz = this.way.z - p.z;
+    const d = Math.hypot(dx, dz);
+    if (d < 1e-3) return false;
+    out.x = dx / d;
+    out.z = dz / d;
+    return true;
+  }
+
   private face(tx: number, tz: number, dt: number, rate = 8) {
     const want = Math.atan2(tx - this.position.x, tz - this.position.z);
     let d = want - this.yaw;
@@ -302,7 +327,7 @@ export class Enemy {
           this.setState('crouch');
           return [0, 0];
         }
-        if (game.nav.direction(p.x, p.z, _dir)) {
+        if (this.route(dt, game, _dir)) {
           this.face(p.x + _dir.x, p.z + _dir.z, dt, 7);
           return [_dir.x * speed, _dir.z * speed];
         }
@@ -373,7 +398,7 @@ export class Enemy {
           return [0, 0];
         }
         if (d < 7) return [(-dx / d) * speed, (-dz / d) * speed];
-        if ((d > 18 || !sight) && game.nav.direction(p.x, p.z, _dir)) return [_dir.x * speed, _dir.z * speed];
+        if ((d > 18 || !sight) && this.route(dt, game, _dir)) return [_dir.x * speed, _dir.z * speed];
         // hold range, drifting sideways
         if (Math.random() < dt * 0.3) this.strafe *= -1;
         return [(-dz / d) * speed * 0.4 * this.strafe, (dx / d) * speed * 0.4 * this.strafe];

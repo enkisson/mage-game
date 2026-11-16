@@ -9,7 +9,9 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "playtest": "vite build && node tools/playtest.cjs",
+    "assets": "python3 tools/fetch-assets.py"
   },
   "dependencies": {
     "@fontsource/barlow-semi-condensed": "5.1.0",

@@ -19,7 +19,7 @@ import { Caster } from '../magic/caster';
 import { SIGILS, type SigilId } from '../magic/sigils';
 import { Effects } from '../fx/effects';
 import { Hud } from '../ui/hud';
-import { createSky, loadHdrSky, type NightSky } from './sky';
+import { createSky, loadPhotoSky, type NightSky } from './sky';
 import { loadTextures } from '../art/materials';
 import { emptyKnowledge, learnSigil, loadKnowledge, saveKnowledge, type Knowledge } from './save';
 
@@ -70,6 +70,8 @@ export class Game {
   private reading: JournalDef | null = null;
   private seaClock = 0;
   private exitSpot: THREE.Vector3;
+  /** When true the loop idles and tests drive the game step by step. */
+  private manual = false;
 
   constructor(private container: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
@@ -77,9 +79,10 @@ export class Game {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.0;
+    this.renderer.toneMappingExposure = 1.05;
     container.appendChild(this.renderer.domElement);
     this.renderer.domElement.tabIndex = 0;
+    container.addEventListener('wheel', (e) => e.preventDefault(), { passive: false });
 
     const scene = this.world.scene;
     this.view = new View(1);
@@ -95,11 +98,11 @@ export class Game {
     this.world.addCollider(this.level.collision);
     this.sky = createSky(scene, {
       top: 0x060a1a, mid: 0x15233f, horizon: 0x40506b, glow: 0xd97a3a, glowDir: [-0.75, 0, 0.66],
-      fog: 0x18212f, fogDensity: 0.0062,
-      keyColor: 0xbfd2ff, keyIntensity: 1.7, keyDir: [0.45, 0.72, 0.5], ambient: 0.7,
+      fog: 0x18212f, fogDensity: 0.0075,
+      keyColor: 0xb9cbff, keyIntensity: 1.25, keyDir: [0.55, 0.55, 0.3], ambient: 0.7,
     });
 
-    this.nav = new NavGrid(this.level.bounds, { cell: 1, stepUp: 0.7, dropMax: 7, minHeight: this.level.waterLevel - 0.35 },
+    this.nav = new NavGrid(this.level.bounds, { cell: 1, stepUp: 0.85, dropMax: 7, minHeight: this.level.waterLevel - 0.35 },
       (x, z) => this.world.groundAt(x, z));
 
     this.enemies = new Enemies(this);
@@ -151,7 +154,7 @@ export class Game {
     // scanned textures and sky arrive when they arrive; the game is playable before then
     const assets = import.meta.env.BASE_URL + 'assets/';
     void loadTextures(assets, this.renderer.capabilities.getMaxAnisotropy());
-    void loadHdrSky(scene, this.renderer, assets + 'sky/night.hdr', 0.55, 0);
+    void loadPhotoSky(scene, this.renderer, this.sky, { url: assets + 'sky/night.jpg', rotation: 2.2, backgroundIntensity: 0.26, lightIntensity: 0.5, fog: 0x211f2b });
   }
 
   // ---- flow --------------------------------------------------------------------------------
@@ -492,7 +495,7 @@ export class Game {
     const tick = (now: number) => {
       const dt = this.last ? (now - this.last) / 1000 : STEP;
       this.last = now;
-      this.frame(dt);
+      if (!this.manual) this.frame(dt);
       requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);
@@ -510,9 +513,11 @@ export class Game {
         this.view.update(STEP, this.player, this.caster.sentence.length > 0);
         this.fx.update(STEP);
       }
-      this.present(0);
     },
+    /** Draw one frame now. */
+    render: () => this.present(0),
     start: () => {
+      this.manual = true;
       this.input.lockUnavailable = true;
       this.hud.hideOverlay();
       this.mode = 'playing';

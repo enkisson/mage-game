@@ -7,12 +7,12 @@ import * as THREE from 'three';
 import { clamp, smoothstep, fbm, rng, distToSegment } from '../core/math';
 import { mergeForCollision } from './world';
 import type { Level, JournalDef, StandDef } from './level';
-import { MATERIALS } from '../art/materials';
+import { MATERIALS, waterRipples } from '../art/materials';
 
 export const COVE = { x: 0, z: -70, r: 26 };
 const BOUNDS = { minX: -62, maxX: 62, minZ: -112, maxZ: 62 };
 const MESA = { x: 13, z: -82, r: 5.6, h: 5.0 };
-const MESA_RAMP = { ax: 1, az: -92, bx: 9.5, bz: -86.5 };
+const MESA_RAMP = { ax: -1.5, az: -91, bx: 9.5, bz: -86.5 };
 
 /** Where the ravine runs as it winds inland. */
 export function pathX(z: number) {
@@ -50,7 +50,7 @@ export function shoreHeight(x: number, z: number): number {
   const dMesa = Math.hypot(x - MESA.x, z - MESA.z);
   const mesa = (1 - smoothstep(MESA.r - 0.6, MESA.r + 0.6, dMesa)) * MESA.h;
   const [dRamp, t] = distToSegment(x, z, MESA_RAMP.ax, MESA_RAMP.az, MESA_RAMP.bx, MESA_RAMP.bz);
-  const ramp = (1 - smoothstep(1.7, 2.7, dRamp)) * MESA.h * t;
+  const ramp = (1 - smoothstep(2.0, 3.0, dRamp)) * MESA.h * t;
 
   h += bowl * inland * Math.max(ledge, mesa, ramp);
   return h;
@@ -117,13 +117,11 @@ function rock(seed: number, radius: number, stretch: [number, number, number] = 
     p.setXYZ(i, v.x * stretch[0], v.y * stretch[1], v.z * stretch[2]);
   }
   geo.computeVertexNormals();
-  const uvs = new Float32Array(p.count * 2);
-  for (let i = 0; i < p.count; i++) {
-    uvs[i * 2] = (p.getX(i) + p.getZ(i) * 0.5) / 3;
-    uvs[i * 2 + 1] = (p.getY(i) + p.getZ(i) * 0.5) / 3;
-  }
-  geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
-  const mesh = new THREE.Mesh(geo, MATERIALS.rock);
+  // all rock, no sand; `place` marks the wet part once it knows where the boulder sits
+  const blend = new Float32Array(p.count * 2);
+  for (let i = 0; i < p.count; i++) blend[i * 2] = 1;
+  geo.setAttribute('blend', new THREE.BufferAttribute(blend, 2));
+  const mesh = new THREE.Mesh(geo, MATERIALS.ground);
   mesh.castShadow = true;
   mesh.receiveShadow = true;
   return mesh;
@@ -275,8 +273,12 @@ export function buildShore(): Level {
 
   // --- rocks -----------------------------------------------------------------------------
   const place = (m: THREE.Mesh, x: number, z: number, sink = 0.35, yaw = 0) => {
-    m.position.set(x, ground(x, z) - sink * (m.geometry.boundingSphere?.radius ?? 1), z);
+    m.geometry.computeBoundingSphere();
+    m.position.set(x, ground(x, z) - sink * m.geometry.boundingSphere!.radius, z);
     m.rotation.y = yaw;
+    // darken whatever sits in the tide
+    const blend = m.geometry.attributes.blend, pos = m.geometry.attributes.position;
+    for (let i = 0; i < pos.count; i++) blend.setY(i, smoothstep(1.3, 0.1, pos.getY(i) + m.position.y));
     solid.add(m);
     return m;
   };
@@ -419,5 +421,9 @@ export function buildShore(): Level {
     stands: [stand],
     bounds: BOUNDS,
     waterLevel: 0,
+    update(time) {
+      // the swell drifts shoreward
+      waterRipples.offset.set(time * 0.012, -time * 0.02);
+    },
   };
 }
