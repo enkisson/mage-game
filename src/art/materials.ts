@@ -31,8 +31,8 @@ function groundMaterial(): THREE.MeshStandardMaterial {
     Object.assign(shader.uniforms, groundUniforms);
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', `#include <common>
-        attribute vec2 blend;
-        varying vec2 vBlend;
+        attribute vec3 blend;
+        varying vec3 vBlend;
         varying vec3 vWPos;
         varying vec3 vWNormal;`)
       .replace('#include <begin_vertex>', `#include <begin_vertex>
@@ -44,11 +44,17 @@ function groundMaterial(): THREE.MeshStandardMaterial {
         uniform sampler2D sandMap, sandNormal, rockMap, rockNormal;
         uniform float useMaps, sandScale, rockScale;
         uniform vec3 sandColor, rockColor;
-        varying vec2 vBlend;
+        varying vec3 vBlend;
         varying vec3 vWPos;
         varying vec3 vWNormal;
         vec3 gTriWeights;
         float gRock;
+        float gHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+        float gNoise(vec2 p) {
+          vec2 i = floor(p), f = fract(p);
+          f = f * f * (3.0 - 2.0 * f);
+          return mix(mix(gHash(i), gHash(i + vec2(1.0, 0.0)), f.x), mix(gHash(i + vec2(0.0, 1.0)), gHash(i + vec2(1.0, 1.0)), f.x), f.y);
+        }
         vec4 triplanar(sampler2D tex, float scale) {
           vec4 x = texture2D(tex, vWPos.zy * scale);
           vec4 y = texture2D(tex, vWPos.xz * scale);
@@ -58,7 +64,9 @@ function groundMaterial(): THREE.MeshStandardMaterial {
       .replace('#include <map_fragment>', `
         gTriWeights = pow(abs(normalize(vWNormal)), vec3(6.0));
         gTriWeights /= (gTriWeights.x + gTriWeights.y + gTriWeights.z);
-        gRock = smoothstep(0.35, 0.65, vBlend.x);
+        // sand gives way to rock along a ragged edge, not a straight one
+        float edge = gNoise(vWPos.xz * 0.9) * 0.6 + gNoise(vWPos.xz * 3.7) * 0.4;
+        gRock = smoothstep(0.3, 0.7, vBlend.x + (edge - 0.5) * 0.4);
         vec3 sandC = sandColor;
         vec3 rockC = rockColor;
         if (useMaps > 0.5) {
@@ -69,6 +77,14 @@ function groundMaterial(): THREE.MeshStandardMaterial {
         }
         vec3 groundC = mix(sandC, rockC, gRock);
         groundC *= mix(1.0, 0.55, vBlend.y);
+        // damp, shaded sand where it is banked against something
+        groundC *= mix(1.0, 0.7, smoothstep(0.0, 0.9, vBlend.z));
+        // the wrack line: weed and splinters left along the last high tide
+        // (a thin, broken string of it, wandering a little up and down the beach)
+        float tide = vWPos.y + (gNoise(vWPos.xz * 0.35) - 0.5) * 0.12;
+        float band = smoothstep(0.4, 0.46, tide) * smoothstep(0.56, 0.5, tide);
+        float weed = smoothstep(0.52, 0.7, gNoise(vWPos.xz * vec2(1.6, 5.0)) * 0.5 + gNoise(vWPos.xz * 13.0) * 0.5);
+        groundC = mix(groundC, vec3(0.07, 0.06, 0.04), band * weed * 0.7 * (1.0 - gRock));
         diffuseColor.rgb *= groundC;`)
       .replace('#include <roughnessmap_fragment>', `
         float roughnessFactor = roughness * mix(mix(0.95, 0.85, gRock), 0.3, vBlend.y * 0.8);`)
@@ -123,6 +139,81 @@ function rippleNormals(size = 256): THREE.DataTexture {
 
 export const waterRipples = rippleNormals();
 
+/** What objects need to know about the ground they sit on: its height everywhere, and its sand. */
+export const seat = {
+  height: { value: null as THREE.Texture | null },
+  min: { value: new THREE.Vector2() },
+  size: { value: new THREE.Vector2(1, 1) },
+  on: { value: 0 },
+};
+
+/**
+ * Bed a material into the ground. Wherever the surface comes within `reach` metres of the
+ * sand it takes on the sand itself, raggedly, with a damp margin above; so a hull or a rock
+ * looks half swallowed instead of resting on top.
+ */
+export function seatInGround<T extends THREE.MeshStandardMaterial>(m: T, reach: number): T {
+  if (m.userData.seated) return m;
+  m.userData.seated = true;
+  const uReach = { value: reach };
+  m.onBeforeCompile = (shader) => {
+    shader.uniforms.uSeatHeight = seat.height;
+    shader.uniforms.uSeatMin = seat.min;
+    shader.uniforms.uSeatSize = seat.size;
+    shader.uniforms.uSeatOn = seat.on;
+    shader.uniforms.uSeatSand = groundUniforms.sandMap;
+    shader.uniforms.uSeatSandColor = groundUniforms.sandColor;
+    shader.uniforms.uSeatSandScale = groundUniforms.sandScale;
+    shader.uniforms.uSeatUseMap = groundUniforms.useMaps;
+    shader.uniforms.uSeatReach = uReach;
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vSeatPos;')
+      .replace('#include <project_vertex>', `#include <project_vertex>
+        #ifdef USE_INSTANCING
+          vSeatPos = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz;
+        #else
+          vSeatPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
+        #endif`);
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', `#include <common>
+        uniform sampler2D uSeatHeight, uSeatSand;
+        uniform vec2 uSeatMin, uSeatSize;
+        uniform vec3 uSeatSandColor;
+        uniform float uSeatOn, uSeatReach, uSeatSandScale, uSeatUseMap;
+        varying vec3 vSeatPos;
+        float seatSandy;
+        float sHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+        float sNoise(vec2 p) {
+          vec2 i = floor(p), f = fract(p);
+          f = f * f * (3.0 - 2.0 * f);
+          return mix(mix(sHash(i), sHash(i + vec2(1.0, 0.0)), f.x), mix(sHash(i + vec2(0.0, 1.0)), sHash(i + vec2(1.0, 1.0)), f.x), f.y);
+        }`)
+      .replace('#include <map_fragment>', `#include <map_fragment>
+        seatSandy = 0.0;
+        if (uSeatOn > 0.5) {
+          float groundY = texture2D(uSeatHeight, (vSeatPos.xz - uSeatMin) / uSeatSize).r;
+          float above = vSeatPos.y - groundY;
+          float ragged = (sNoise(vSeatPos.xz * 2.3 + vSeatPos.y * 1.7) - 0.5) * 0.9 + (sNoise(vSeatPos.xz * 9.0 + vSeatPos.y * 6.0) - 0.5) * 0.35;
+          float h = above / uSeatReach + ragged * 0.55;
+          seatSandy = smoothstep(1.0, 0.25, h);
+          vec3 sand = uSeatSandColor;
+          if (uSeatUseMap > 0.5) {
+            sand = texture2D(uSeatSand, vSeatPos.xz * uSeatSandScale).rgb;
+            sand = mix(sand, texture2D(uSeatSand, vSeatPos.xz * uSeatSandScale * 0.23 + 0.37).rgb, 0.35);
+          }
+          // a damp, stained margin just above the sand, then the sand itself
+          diffuseColor.rgb *= mix(1.0, 0.62, smoothstep(2.6, 1.0, h) * (1.0 - seatSandy));
+          diffuseColor.rgb = mix(diffuseColor.rgb, sand * 0.9, seatSandy);
+        }`)
+      .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
+        roughnessFactor = mix(roughnessFactor, 0.95, seatSandy);`)
+      .replace('#include <metalnessmap_fragment>', `#include <metalnessmap_fragment>
+        metalnessFactor *= 1.0 - seatSandy;`);
+  };
+  m.needsUpdate = true;
+  return m;
+}
+
 export const seaUniforms = { uTime: { value: 0 } };
 
 /**
@@ -139,19 +230,23 @@ function seaMaterial(): THREE.MeshStandardMaterial {
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', `#include <common>
         attribute float depth;
+        attribute float shoal;
         uniform float uTime;
         varying float vDepth;
+        varying float vShoal;
         varying vec2 vShore;`)
       .replace('#include <begin_vertex>', `#include <begin_vertex>
         // the swell: the whole surface breathes, and with it the waterline moves on the sand
         float swell = sin(uTime * 0.55 + position.x * 0.05) * 0.07 + sin(uTime * 0.9 + position.x * 0.13 + 1.7) * 0.035;
         transformed.z += swell;
         vDepth = depth + swell;
+        vShoal = shoal;
         vShore = position.xy;`);
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', `#include <common>
         uniform float uTime;
         varying float vDepth;
+        varying float vShoal;
         varying vec2 vShore;
         float seaHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
         float seaNoise(vec2 p) {
@@ -169,7 +264,9 @@ function seaMaterial(): THREE.MeshStandardMaterial {
         float lace = seaNoise(vShore * 1.7 + vec2(uTime * 0.25, -uTime * 0.4)) * 0.6 + seaNoise(vShore * 5.0 - vec2(uTime * 0.5, 0.0)) * 0.4;
         float lip = smoothstep(0.1, 0.0, d);
         float streaks = smoothstep(0.55, 0.05, d) * smoothstep(0.52, 0.8, lace);
-        float foam = clamp(lip * 0.9 + streaks * 0.7, 0.0, 1.0);
+        // and white water where the swell meets a rock standing in it
+        float wash = smoothstep(0.12, 0.6, vShoal + (lace - 0.5) * 0.6) * (0.7 + 0.3 * sin(uTime * 0.9 + vShore.x * 0.3));
+        float foam = clamp(lip * 0.9 + streaks * 0.7 + wash, 0.0, 1.0);
         diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.62, 0.66, 0.7), foam);
         diffuseColor.a = mix(smoothstep(0.0, 0.5, d) * 0.5 + smoothstep(0.2, 1.4, d) * 0.45, 0.9, foam);`)
       .replace('#include <roughnessmap_fragment>', `

@@ -7,7 +7,7 @@ import * as THREE from 'three';
 import { clamp, smoothstep, fbm, rng, distToSegment } from '../core/math';
 import { mergeForCollision } from './world';
 import type { Level, JournalDef, StandDef } from './level';
-import { MATERIALS, waterRipples, seaUniforms } from '../art/materials';
+import { MATERIALS, waterRipples, seaUniforms, seat, seatInGround } from '../art/materials';
 import { centred, type Models } from '../art/models';
 import { HandRig, SHAPES, shapeToArray } from '../player/hands';
 
@@ -21,8 +21,74 @@ export function pathX(z: number) {
   return 7 * Math.sin((z + 22) * 0.065);
 }
 
-/** Ground height of the shore before props are placed. */
+/** The wind off the sea. Sand banks up on the sheltered side of whatever stands in it. */
+const WIND = { x: 0.5, z: -0.866 };
+
+/** Sand heaped round something standing on the beach, with a longer tail downwind. */
+interface Mound { x: number; z: number; r: number; h: number }
+/** Sand banked along the length of a hull lying on the beach. */
+interface Berm { ax: number; az: number; bx: number; bz: number; halfWidth: number; left: number; right: number; reachLeft: number; reachRight: number }
+
+const mounds: Mound[] = [];
+const berms: Berm[] = [];
+
+function moundShape(m: Mound, x: number, z: number): number {
+  const dx = x - m.x, dz = z - m.z;
+  if (Math.abs(dx) > m.r * 3.2 || Math.abs(dz) > m.r * 3.2) return 0;
+  const along = dx * WIND.x + dz * WIND.z, across = dx * -WIND.z + dz * WIND.x;
+  const d = Math.hypot(along * (along > 0 ? 0.55 : 1.2), across) / m.r;
+  return Math.exp(-d * d * 0.9);
+}
+
+/** How strongly the hull's sandbank is felt here (0–1), and which side of the hull this is. */
+function bermShape(b: Berm, x: number, z: number): [number, number] {
+  const dx = b.bx - b.ax, dz = b.bz - b.az;
+  const len2 = dx * dx + dz * dz;
+  const t = clamp(((x - b.ax) * dx + (z - b.az) * dz) / len2, 0, 1);
+  const px = b.ax + dx * t, pz = b.az + dz * t;
+  const d = Math.hypot(x - px, z - pz);
+  const side = (x - b.ax) * dz - (z - b.az) * dx > 0 ? 1 : -1; // +1 = left of a→b
+  // a hull is widest amidships and tapers to bow and stern
+  const width = b.halfWidth * (1 - 0.72 * Math.pow(Math.abs(t * 2 - 1), 2.4));
+  const out = d - width;
+  const reach = side > 0 ? b.reachLeft : b.reachRight;
+  // banked highest against the planking, falling away outside; under the hull it drops off quickly
+  const shape = out > 0 ? Math.exp(-out / reach) : Math.max(0, 1 + out / 1.1);
+  return [shape, side];
+}
+
+/** How much higher the sand lies here because of what is standing on the beach. */
+function driftHeight(x: number, z: number): number {
+  let h = 0;
+  for (const m of mounds) h += m.h * moundShape(m, x, z);
+  for (const b of berms) {
+    const [shape, side] = bermShape(b, x, z);
+    if (shape > 0.002) {
+      const wave = 0.78 + 0.34 * fbm(x * 0.21 + 7, z * 0.21, 2);
+      h += shape * (side > 0 ? b.left : b.right) * wave;
+    }
+  }
+  return h;
+}
+
+/** How closely something presses on the sand here (0–1): damp, shaded ground at its foot. */
+function contact(x: number, z: number): number {
+  let c = 0;
+  for (const m of mounds) {
+    const dx = x - m.x, dz = z - m.z;
+    c = Math.max(c, Math.exp(-(dx * dx + dz * dz) / (m.r * m.r * 0.55)) * 0.9);
+  }
+  for (const b of berms) c = Math.max(c, Math.pow(bermShape(b, x, z)[0], 1.6) * 0.85);
+  return Math.min(1, c);
+}
+
+/** Ground height of the shore, with the sand drifted round whatever stands on it. */
 export function shoreHeight(x: number, z: number): number {
+  return bedHeight(x, z) + driftHeight(x, z);
+}
+
+/** Ground height of the bare shore, before anything is set down on it. */
+function bedHeight(x: number, z: number): number {
   // beach: rises gently inland, falls away under the sea
   let h = clamp((30 - z) * 0.06, -7, 3.0);
   if (z > 30) h -= (z - 30) * 0.06;
@@ -87,18 +153,20 @@ function terrain(cell: number): THREE.Mesh {
   geo.setIndex(idx);
   geo.computeVertexNormals();
 
-  // blend weights for the ground material: x = rock (steep or high), y = wet (near the tide line)
+  // blend weights for the ground material: x = rock (steep or high), y = wet (near the tide line),
+  // z = pressed on by something (damp and shaded)
   const normal = geo.attributes.normal;
-  const blend = new Float32Array((nx + 1) * (nz + 1) * 2);
+  const blend = new Float32Array((nx + 1) * (nz + 1) * 3);
   for (let k = 0; k < (nx + 1) * (nz + 1); k++) {
     const y = pos[k * 3 + 1], z = pos[k * 3 + 2], x = pos[k * 3];
     const steep = smoothstep(0.86, 0.62, normal.getY(k));
     const inland = smoothstep(-20, -26, z) * 0.75;
     const patch = smoothstep(0.1, 0.5, fbm(x * 0.09 + 20, z * 0.09, 3)) * 0.5 * inland;
-    blend[k * 2] = clamp(Math.max(steep, inland * 0.55 + patch), 0, 1);
-    blend[k * 2 + 1] = smoothstep(1.1, -0.2, y);
+    blend[k * 3] = clamp(Math.max(steep, inland * 0.55 + patch), 0, 1);
+    blend[k * 3 + 1] = smoothstep(1.1, -0.2, y);
+    blend[k * 3 + 2] = contact(x, z);
   }
-  geo.setAttribute('blend', new THREE.BufferAttribute(blend, 2));
+  geo.setAttribute('blend', new THREE.BufferAttribute(blend, 3));
 
   const mesh = new THREE.Mesh(geo, MATERIALS.ground);
   mesh.receiveShadow = true;
@@ -120,9 +188,9 @@ function rock(seed: number, radius: number, stretch: [number, number, number] = 
   }
   geo.computeVertexNormals();
   // all rock, no sand; `place` marks the wet part once it knows where the boulder sits
-  const blend = new Float32Array(p.count * 2);
-  for (let i = 0; i < p.count; i++) blend[i * 2] = 1;
-  geo.setAttribute('blend', new THREE.BufferAttribute(blend, 2));
+  const blend = new Float32Array(p.count * 3);
+  for (let i = 0; i < p.count; i++) blend[i * 3] = 1;
+  geo.setAttribute('blend', new THREE.BufferAttribute(blend, 3));
   const mesh = new THREE.Mesh(geo, MATERIALS.ground);
   mesh.castShadow = true;
   mesh.receiveShadow = true;
@@ -202,7 +270,7 @@ function bowWreck(): THREE.Group {
  */
 function body(handModel: THREE.Object3D | null): { group: THREE.Group; journalAt: THREE.Vector3 } {
   const g = new THREE.Group();
-  const robe = new THREE.MeshStandardMaterial({ color: 0x232a3d, roughness: 1 });
+  const robe = seatInGround(new THREE.MeshStandardMaterial({ color: 0x232a3d, roughness: 1 }), 0.07);
   /** A rounded mass of wet cloth, creased by noise so it does not look turned on a lathe. */
   const drape = (size: [number, number, number], at: [number, number, number], seed: number, rot: [number, number, number] = [0, 0, 0]) => {
     const geo = new THREE.SphereGeometry(1, 28, 18);
@@ -276,17 +344,28 @@ function glowSprite(color: number, size: number, brightness: number): THREE.Spri
   return s;
 }
 
-/** A dark pool the Gloam rise out of. */
+/** A dark pool the Gloam rise out of: black water with a sick light in it, lying in a hollow. */
 function tidePool(radius: number): THREE.Group {
   const g = new THREE.Group();
-  const pool = new THREE.Mesh(new THREE.CircleGeometry(radius, 28), new THREE.MeshBasicMaterial({ color: 0x030806 }));
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const ctx = c.getContext('2d')!;
+  const grad = ctx.createRadialGradient(128, 128, 0, 128, 128, 128);
+  grad.addColorStop(0, 'rgba(1,4,3,1)');
+  grad.addColorStop(0.55, 'rgba(2,8,5,0.98)');
+  grad.addColorStop(0.8, 'rgba(22,60,12,0.9)');
+  grad.addColorStop(0.92, 'rgba(70,150,30,0.45)');
+  grad.addColorStop(1, 'rgba(70,150,30,0)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 256, 256);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const pool = new THREE.Mesh(new THREE.CircleGeometry(radius, 40), new THREE.MeshStandardMaterial({
+    map: tex, transparent: true, roughness: 0.05, metalness: 0.2, emissive: 0x2a6a10, emissiveIntensity: 0.25, depthWrite: false,
+  }));
   pool.rotation.x = -Math.PI / 2;
-  pool.position.y = 0.04;
+  pool.renderOrder = 1;
   g.add(pool);
-  const rim = new THREE.Mesh(new THREE.RingGeometry(radius * 0.92, radius * 1.05, 28), new THREE.MeshBasicMaterial({ color: new THREE.Color(0x8dff3a).multiplyScalar(1.5), transparent: true, opacity: 0.5 }));
-  rim.rotation.x = -Math.PI / 2;
-  rim.position.y = 0.05;
-  g.add(rim);
   const light = new THREE.PointLight(0x8dff3a, 6, 9, 1.8);
   light.position.y = 0.9;
   g.add(light);
@@ -388,27 +467,53 @@ export function buildShore(models: Models): Level {
   const ground = (x: number, z: number) => shoreHeight(x, z);
   const hidden = new THREE.MeshBasicMaterial({ visible: false });
 
-  solid.add(terrain(0.8));
+  // The sand is shaped by what stands on it, so things are declared first and set down
+  // afterwards: `later` holds the steps that need the finished ground.
+  mounds.length = 0;
+  berms.length = 0;
+  const later: (() => void)[] = [];
+  // the pools the Gloam rise from lie in hollows
+  const POOLS: [number, number][] = [[-13, -51], [21, -66], [-15.5, -81]];
+  for (const [x, z] of POOLS) mounds.push({ x, z, r: 2.7, h: -0.3 });
+  // the body has lain long enough for the sand to gather against it
+  mounds.push({ x: 4.3, z: 22.2, r: 1.5, h: 0.07 });
 
-  /** Set a scanned object on the ground, with a simple shape wrapped round it to bump into. */
+  /**
+   * Set a scanned object on the ground, with a simple shape wrapped round it to bump into.
+   * The sand drifts against it (`drift` scales how much) and creeps `reach` metres up it.
+   */
   const prop = (src: THREE.Mesh, key: string, x: number, z: number, scale: number | [number, number, number], yaw: number,
-    { sink = 0.2, tilt = 0, collide = true, parent = root as THREE.Object3D, y = NaN } = {}): THREE.Mesh => {
-    const m = new THREE.Mesh(src.geometry, src.material);
+    { sink = 0.2, tilt = 0, collide = true, parent = root as THREE.Object3D, y = NaN, drift = 1, reach = 0.2 } = {}): THREE.Mesh => {
+    const onGround = parent === root;
+    const material = onGround ? seatInGround(src.material as THREE.MeshStandardMaterial, reach) : src.material;
+    const m = new THREE.Mesh(src.geometry, material);
     const sc = typeof scale === 'number' ? [scale, scale, scale] : scale;
     m.scale.set(sc[0], sc[1], sc[2]);
     const height = src.geometry.boundingBox!.max.y * sc[1];
-    m.position.set(x, (Number.isNaN(y) ? ground(x, z) : y) - height * sink, z);
+    m.position.set(x, Number.isNaN(y) ? 0 : y - height * sink, z);
     m.rotation.set(tilt, yaw, tilt * 0.6);
     m.castShadow = true;
     m.receiveShadow = true;
     m.userData.noCollide = true;
     parent.add(m);
+    let proxy: THREE.Mesh | null = null;
     if (collide) {
-      const proxy = new THREE.Mesh(models.hull(src, key), hidden);
+      proxy = new THREE.Mesh(models.hull(src, key), hidden);
       proxy.position.copy(m.position);
       proxy.rotation.copy(m.rotation);
       proxy.scale.copy(m.scale);
-      (parent === root ? solid : parent).add(proxy);
+      (onGround ? solid : parent).add(proxy);
+    }
+    if (onGround) {
+      // heap sand round it, more on the open beach than on the stony ground inland
+      const b = src.geometry.boundingBox!;
+      const across = Math.max((b.max.x - b.min.x) * sc[0], (b.max.z - b.min.z) * sc[2]) * 0.5;
+      const own = drift > 0 ? clamp(0.05 + across * 0.2, 0.05, 0.6) * drift * (z < -24 ? 0.55 : 1) : 0;
+      if (own > 0) mounds.push({ x, z, r: across * 1.3 + 0.35, h: own });
+      later.push(() => {
+        m.position.y = ground(x, z) - own - height * sink;
+        proxy?.position.copy(m.position);
+      });
     }
     return m;
   };
@@ -420,16 +525,18 @@ export function buildShore(models: Models): Level {
   const stone = (seed: number, x: number, z: number, radius: number, stretch: [number, number, number] = [1, 0.8, 1], sink = 0.25, yaw = 0) => {
     if (boulder) {
       const k = radius / 1.25;
-      prop(boulder, 'boulder', x, z, [k * stretch[0], k * stretch[1] * 1.35, k * stretch[2]], yaw + seed, { sink });
+      prop(boulder, 'boulder', x, z, [k * stretch[0], k * stretch[1] * 1.35, k * stretch[2]], yaw + seed, { sink, reach: 0.24 });
       return;
     }
     const m = rock(seed, radius, stretch);
     m.geometry.computeBoundingSphere();
-    m.position.set(x, ground(x, z) - sink * m.geometry.boundingSphere!.radius, z);
     m.rotation.y = yaw;
-    const blend = m.geometry.attributes.blend, pos = m.geometry.attributes.position;
-    for (let i = 0; i < pos.count; i++) blend.setY(i, smoothstep(1.3, 0.1, pos.getY(i) + m.position.y));
     solid.add(m);
+    later.push(() => {
+      m.position.set(x, ground(x, z) - sink * m.geometry.boundingSphere!.radius, z);
+      const blend = m.geometry.attributes.blend, pos = m.geometry.attributes.position;
+      for (let i = 0; i < pos.count; i++) blend.setY(i, smoothstep(1.3, 0.1, pos.getY(i) + m.position.y));
+    });
   };
 
   // sea stacks
@@ -457,7 +564,7 @@ export function buildShore(models: Models): Level {
   // flat slabs of slate lying about
   if (slab) {
     const slabs: [number, number, number][] = [[-22, -12, 22], [19, -14, 18], [9, 20, 14], [-16, 21, 16], [pathX(-28) - 2.6, -28, 13], [16, -52, 20], [-9, -62, 15], [27, -6, 24], [-38, 2, 20]];
-    slabs.forEach(([x, z, k], i) => prop(slab, 'slab', x, z, [k, k * 1.3, k], i * 1.9, { sink: 0.3, tilt: (r() - 0.5) * 0.2 }));
+    slabs.forEach(([x, z, k], i) => prop(slab, 'slab', x, z, [k, k * 1.3, k], i * 1.9, { sink: 0.3, tilt: (r() - 0.5) * 0.2, reach: 0.14 }));
   }
 
   // --- the wreck -------------------------------------------------------------------------
@@ -472,18 +579,29 @@ export function buildShore(models: Models): Level {
     ship.scale.setScalar(1.25);
     ship.rotation.order = 'YXZ';
     ship.rotation.set(-0.25, Math.PI + 0.1, 0.03);
-    ship.position.set(-5, ground(-5, 6) - 1.1, 6);
-    shipModel.traverse((o) => { if (!o.name.includes('hull')) o.userData.noCollide = true; });
+    ship.position.set(-5, bedHeight(-5, 6) - 1.1, 6);
+    shipModel.traverse((o) => {
+      if (!o.name.includes('hull')) o.userData.noCollide = true;
+      else if ((o as THREE.Mesh).isMesh) seatInGround((o as THREE.Mesh).material as THREE.MeshStandardMaterial, 0.8);
+    });
     solid.add(ship);
     ship.updateMatrixWorld(true);
     const onShip = (x: number, y: number, z: number) => ship.localToWorld(new THREE.Vector3(x, y, z));
 
+    // The sea has been burying her since she struck: sand banked high along the landward
+    // side, where the wind drops it, and a lower bank on the side the waves reach.
+    const sternAt = onShip(-9.2, 0, 0), bowAt = onShip(9.8, 0, 0);
+    berms.push({ ax: sternAt.x, az: sternAt.z, bx: bowAt.x, bz: bowAt.z, halfWidth: 3.25, left: 0.55, right: 1.15, reachLeft: 1.7, reachRight: 2.8 });
+
     // a hatch cover, torn loose, makes a gangway from the sand up over the low rail
     const top = onShip(-0.4, 2.02, -2.5);
     const foot = new THREE.Vector3(top.x + 0.6, 0, top.z + 6.2);
-    foot.y = ground(foot.x, foot.z) - 0.05;
-    solid.add(plank(foot, top.clone().add(new THREE.Vector3(-0.05, 0.02, -0.45)), 2.3, MATERIALS.wood));
-    landmarks.gangwayFoot = foot.clone();
+    seatInGround(MATERIALS.wood, 0.1);
+    later.push(() => {
+      foot.y = ground(foot.x, foot.z) - 0.08;
+      solid.add(plank(foot, top.clone().add(new THREE.Vector3(-0.05, 0.02, -0.45)), 2.3, MATERIALS.wood));
+    });
+    landmarks.gangwayFoot = foot;
     landmarks.gangwayTop = top.clone();
     landmarks.deck = onShip(0.6, 1.75, 0);
 
@@ -523,29 +641,101 @@ export function buildShore(models: Models): Level {
   const barrelA = models.piece('barrels', 'barrel01');
   const barrelB = models.piece('barrels', 'barrel02');
   if (barrelA) {
-    prop(barrelA, 'barrelA', 6.5, 16.5, 1.15, 0.4, { sink: 0.12, tilt: 0.12 });
-    prop(barrelA, 'barrelA', -15, 17, 1.15, 2.1, { sink: 0.3, tilt: -0.2 });
+    prop(barrelA, 'barrelA', 6.5, 16.5, 1.15, 0.4, { sink: 0.12, tilt: 0.12, reach: 0.13 });
+    prop(barrelA, 'barrelA', -15, 17, 1.15, 2.1, { sink: 0.3, tilt: -0.2, reach: 0.13 });
   }
-  if (barrelB) prop(barrelB, 'barrelB', 10.5, 21.5, 1.15, 1.2, { sink: 0.35, tilt: 1.35 });
+  if (barrelB) prop(barrelB, 'barrelB', 10.5, 21.5, 1.15, 1.2, { sink: 0.35, tilt: 1.35, reach: 0.13 });
   const staves = models.pieces('barrels').filter((m) => m.name.includes('piece')).map((m) => centred(m));
   staves.forEach((s2, i) => {
     const a = i * 2.4, d = 2 + (i % 5) * 1.3;
-    prop(s2, `stave${i}`, 4 + Math.cos(a) * d * 1.6, 18.5 + Math.sin(a) * d, 1.2, a * 1.7, { sink: 0.3, tilt: (i % 3 - 1) * 0.25, collide: false });
+    prop(s2, `stave${i}`, 4 + Math.cos(a) * d * 1.6, 18.5 + Math.sin(a) * d, 1.2, a * 1.7, { sink: 0.3, tilt: (i % 3 - 1) * 0.25, collide: false, drift: 0.5, reach: 0.045 });
   });
   const chest = models.piece('crate', 'wooden_crate_01');
   if (chest) {
-    prop(chest, 'crate', 8.6, 13.2, 1.5, 0.7, { sink: 0.25, tilt: 0.16 });
-    prop(chest, 'crate', -20, 13.5, 1.5, 2.6, { sink: 0.4, tilt: -0.3 });
+    prop(chest, 'crate', 8.6, 13.2, 1.5, 0.7, { sink: 0.25, tilt: 0.16, reach: 0.12 });
+    prop(chest, 'crate', -20, 13.5, 1.5, 2.6, { sink: 0.4, tilt: -0.3, reach: 0.12 });
   }
   const branches = models.pieces('branches').map((m) => centred(m));
   if (branches.length) {
     const wood: [number, number, number][] = [[-7, 27.2, 2.2], [14, 26.4, 1.8], [-24, 25.5, 2.4], [27, 23, 2], [1, 28.6, 1.6], [-33, 18, 2.2], [20, -15, 2.4], [-13, -16, 2], [pathX(-30) + 2, -30, 1.8], [-8, -55, 2.2], [15, -73, 2]];
-    wood.forEach(([x, z, k], i) => prop(branches[i % branches.length], `branch${i}`, x, z, k, i * 2.3, { sink: 0.15, collide: false }));
+    wood.forEach(([x, z, k], i) => prop(branches[i % branches.length], `branch${i}`, x, z, k, i * 2.3, { sink: 0.15, collide: false, drift: 0.6, reach: 0.05 }));
+  }
+
+  // --- the ground itself, now that it knows what stands on it -------------------------------
+  solid.add(terrain(0.5));
+  for (const step of later) step();
+  {
+    // objects read the height of the sand under them from this, to bed themselves into it
+    const cell = 0.5;
+    const nx = Math.ceil((BOUNDS.maxX - BOUNDS.minX) / cell) + 1, nz = Math.ceil((BOUNDS.maxZ - BOUNDS.minZ) / cell) + 1;
+    const data = new Uint16Array(nx * nz);
+    for (let j = 0; j < nz; j++) {
+      for (let i = 0; i < nx; i++) data[j * nx + i] = THREE.DataUtils.toHalfFloat(ground(BOUNDS.minX + i * cell, BOUNDS.minZ + j * cell));
+    }
+    const tex = new THREE.DataTexture(data, nx, nz, THREE.RedFormat, THREE.HalfFloatType);
+    tex.magFilter = tex.minFilter = THREE.LinearFilter;
+    tex.needsUpdate = true;
+    seat.height.value = tex;
+    seat.min.value.set(BOUNDS.minX - cell / 2, BOUNDS.minZ - cell / 2);
+    seat.size.value.set(nx * cell, nz * cell);
+    seat.on.value = 1;
+    seatInGround(MATERIALS.conjuredStone, 0.3);
+  }
+
+  /** Is the ground here close enough to level for loose things to lie on it? */
+  const level = (x: number, z: number) => Math.abs(ground(x + 0.6, z) - ground(x - 0.6, z)) + Math.abs(ground(x, z + 0.6) - ground(x, z - 0.6)) < 0.5;
+
+  // pebbles and broken rock where the bluff sheds them, and round the bigger stones
+  {
+    const geo = new THREE.IcosahedronGeometry(1, 1);
+    const gp = geo.attributes.position;
+    for (let i = 0; i < gp.count; i++) {
+      const k = 1 + fbm(gp.getX(i) * 2.1, gp.getY(i) * 2.1 + gp.getZ(i) * 1.7, 2) * 0.35;
+      gp.setXYZ(i, gp.getX(i) * k, gp.getY(i) * k * 0.62, gp.getZ(i) * k);
+    }
+    geo.computeVertexNormals();
+    const spots: [number, number, number][] = [];
+    const big = mounds.filter((m) => m.h > 0.12);
+    for (let i = 0; i < 2400 && spots.length < 620; i++) {
+      let x: number, z: number;
+      const kind = r();
+      if (kind < 0.4) {
+        x = -46 + r() * 92;
+        z = -22.5 + Math.pow(r(), 2.2) * 9;
+      } else if (kind < 0.75 && big.length) {
+        const m = big[Math.floor(r() * big.length)];
+        const a = r() * Math.PI * 2, d = m.r * (0.5 + r() * 0.9);
+        x = m.x + Math.cos(a) * d;
+        z = m.z + Math.sin(a) * d;
+      } else if (kind < 0.88) {
+        z = -24 - r() * 20;
+        x = pathX(z) + (r() - 0.5) * 9;
+      } else {
+        const a = r() * Math.PI * 2, d = 6 + r() * 16;
+        x = COVE.x + Math.cos(a) * d;
+        z = COVE.z + Math.sin(a) * d;
+      }
+      if (ground(x, z) < 0.4 || !level(x, z)) continue;
+      spots.push([x, z, 0.04 + Math.pow(r(), 2.5) * 0.24]);
+    }
+    const pebbles = new THREE.InstancedMesh(geo, seatInGround(MATERIALS.rock.clone(), 0.05), spots.length);
+    const d3 = new THREE.Object3D();
+    spots.forEach(([x, z, k], i) => {
+      d3.position.set(x, ground(x, z) - k * 0.2, z);
+      d3.rotation.set(r() * 0.5, r() * 6.28, r() * 0.5);
+      d3.scale.set(k * (0.8 + r() * 0.6), k, k * (0.8 + r() * 0.6));
+      d3.updateMatrix();
+      pebbles.setMatrixAt(i, d3.matrix);
+    });
+    pebbles.castShadow = false;
+    pebbles.receiveShadow = true;
+    pebbles.userData.noCollide = true;
+    root.add(pebbles);
   }
 
   // --- what grows here ---------------------------------------------------------------------
   // marram grass in clumps: thick at the foot of the bluff, along the ravine, round the cove
-  const flat = (x: number, z: number) => Math.abs(ground(x + 0.6, z) - ground(x - 0.6, z)) + Math.abs(ground(x, z + 0.6) - ground(x, z - 0.6)) < 0.5;
+  const flat = level;
   const clumpCentre = (): [number, number] | null => {
     const kind = r();
     let x: number, z: number;
@@ -561,7 +751,7 @@ export function buildShore(models: Models): Level {
       x = COVE.x + Math.cos(a) * d;
       z = COVE.z + Math.sin(a) * d;
     }
-    if (z > -1 && z < 13 && x > -24 && x < 12) return null; // not under the ship
+    if (z > 2.5 && z < 10.5 && x > -22 && x < 10) return null; // not under the ship
     return [x, z];
   };
   const tufts: [number, number, number][][] = [[], [], []];
@@ -647,10 +837,11 @@ export function buildShore(models: Models): Level {
 
   // --- the stand in the cove -------------------------------------------------------------
   const at = (x: number, z: number) => new THREE.Vector3(x, ground(x, z), z);
-  const sw = at(-13, -51), east = at(21, -66), perch = at(-15.5, -81);
+  const [sw, east, perch] = POOLS.map(([x, z]) => at(x, z));
   for (const p of [sw, east, perch]) {
-    const pool = tidePool(2.2);
-    pool.position.copy(p);
+    // the pool stands a little above the bottom of its hollow, so its edge follows the sand
+    const pool = tidePool(3.4);
+    pool.position.copy(p).setY(p.y + 0.14);
     root.add(pool);
   }
   const stand: StandDef = {
@@ -692,18 +883,22 @@ export function buildShore(models: Models): Level {
   // fine near the beach, where the depth changes and the foam runs; coarse out to the horizon
   const seaGeo = (() => {
     const xs: number[] = [], zs: number[] = [];
-    for (let x = -150; x <= 150; x += 2.5) xs.push(x);
+    for (let x = -150; x <= 150; x += 1.25) xs.push(x);
     for (let z = 16; z <= 70; z += 1.25) zs.push(z);
     for (const z of [80, 100, 140, 220, 400, 900]) zs.push(z);
     xs.unshift(-900, -400);
     xs.push(400, 900);
-    const pos: number[] = [], depth: number[] = [], uv: number[] = [], idx: number[] = [];
+    const pos: number[] = [], depth: number[] = [], shoal: number[] = [], uv: number[] = [], idx: number[] = [];
+    const inSea = mounds.filter((m) => m.h > 0.2 && ground(m.x, m.z) - m.h < 0.2);
     for (const z of zs) {
       for (const x of xs) {
         // laid in the XY plane and turned flat afterwards, so "up" for the swell is +Z
         pos.push(x, -z, 0);
         depth.push(Math.min(12, -ground(Math.max(-70, Math.min(70, x)), Math.min(z, 60)) + (z > 60 ? (z - 60) * 0.1 : 0)));
         uv.push(x / 900, z / 900);
+        let near = 0;
+        for (const m of inSea) near = Math.max(near, smoothstep(m.r * 1.25, m.r * 0.55, Math.hypot(x - m.x, z - m.z)));
+        shoal.push(near);
       }
     }
     const w = xs.length;
@@ -716,6 +911,7 @@ export function buildShore(models: Models): Level {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     g.setAttribute('depth', new THREE.Float32BufferAttribute(depth, 1));
+    g.setAttribute('shoal', new THREE.Float32BufferAttribute(shoal, 1));
     g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
     g.setIndex(idx);
     g.computeVertexNormals();
