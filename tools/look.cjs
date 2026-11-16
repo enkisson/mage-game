@@ -20,6 +20,8 @@ const SCENARIOS = {
   ship: `g.debug.start(); g.debug.teleport(14, 24, 0.75, 0.12); g.debug.advance(0.3);`,
   deck: `g.debug.start(); g.debug.teleport(-4.6, 5.2, 1.4, -0.1); g.debug.advance(0.5);`,
   dunes: `g.debug.start(); g.debug.teleport(16, -10, 0.9, -0.05); g.debug.advance(0.3);`,
+  sandline: `g.debug.start(); g.debug.teleport(1, 13, 0.35, -0.3); g.debug.advance(0.3);`,
+  drift: `g.debug.start(); g.debug.teleport(15, 3, 1.3, -0.3); g.debug.advance(0.3);`,
   sea: `g.debug.start(); g.debug.teleport(-4, 18, 2.6, -0.06); g.debug.advance(0.3);`,
   beach: `g.debug.start(); g.debug.teleport(6, 14, 0.5, -0.02); g.debug.advance(0.3);`,
   wreck: `g.debug.start(); g.debug.teleport(2, 6, 1.2, 0.05); g.debug.advance(0.3);`,

@@ -20,6 +20,7 @@ import { SIGILS, type SigilId } from '../magic/sigils';
 import { Effects } from '../fx/effects';
 import { Hud } from '../ui/hud';
 import { createSky, loadPhotoSky, type NightSky } from './sky';
+import { GroundingPass } from './grounding';
 import type { Models } from '../art/models';
 import { emptyKnowledge, learnSigil, loadKnowledge, saveKnowledge, type Knowledge } from './save';
 import { GESTURES, HOLD, IDLE, type GestureName } from '../player/poses';
@@ -66,6 +67,7 @@ export class Game {
 
   private composer: EffectComposer;
   private bloom: UnrealBloomPass;
+  private grounding: GroundingPass;
   private sky: NightSky;
   private journals: { def: JournalDef; prop: JournalProp }[] = [];
   private stands: StandRun[] = [];
@@ -143,6 +145,8 @@ export class Game {
     const target = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 4 });
     this.composer = new EffectComposer(this.renderer, target);
     this.composer.addPass(new RenderPass(scene, this.view.camera));
+    this.grounding = new GroundingPass(scene, this.view.camera);
+    this.composer.addPass(this.grounding);
     this.bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.55, 0.6, 1.0);
     this.composer.addPass(this.bloom);
     this.composer.addPass(new OutputPass());
@@ -411,6 +415,10 @@ export class Game {
       } else if (code === 'KeyE') {
         if (this.nearJournal) this.read(this.nearJournal);
         else if (this.atExit) this.recall(this.stands[0]);
+      } else if (code === 'KeyO') {
+        // for comparing, and for slower machines
+        this.grounding.enabled = !this.grounding.enabled;
+        this.hud.whisper(this.grounding.enabled ? 'Contact shading on' : 'Contact shading off');
       } else if (code === 'BracketLeft' || code === 'BracketRight') {
         this.sensitivity *= code === 'BracketLeft' ? 0.87 : 1.15;
         this.hud.whisper(`Look speed ${Math.round((this.sensitivity / SENSITIVITY) * 100)}%`);

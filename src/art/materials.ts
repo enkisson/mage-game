@@ -193,7 +193,9 @@ export function seatInGround<T extends THREE.MeshStandardMaterial>(m: T, reach: 
         if (uSeatOn > 0.5) {
           float groundY = texture2D(uSeatHeight, (vSeatPos.xz - uSeatMin) / uSeatSize).r;
           float above = vSeatPos.y - groundY;
-          float ragged = (sNoise(vSeatPos.xz * 2.3 + vSeatPos.y * 1.7) - 0.5) * 0.9 + (sNoise(vSeatPos.xz * 9.0 + vSeatPos.y * 6.0) - 0.5) * 0.35;
+          // irregular in every direction, so the sand's edge is blotched and not combed into streaks
+          vec2 face = vec2(vSeatPos.x + vSeatPos.z * 0.7, vSeatPos.y * 1.6 + vSeatPos.z * 0.4);
+          float ragged = (sNoise(face * 2.6) - 0.5) * 0.9 + (sNoise(face * 8.5 + 3.1) - 0.5) * 0.4 + (sNoise(vSeatPos.xz * 3.3) - 0.5) * 0.3;
           float h = above / uSeatReach + ragged * 0.55;
           seatSandy = smoothstep(1.0, 0.25, h);
           vec3 sand = uSeatSandColor;

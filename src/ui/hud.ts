@@ -262,6 +262,7 @@ export class Hud {
       <span><kbd>E</kbd></span><span>Read a journal page</span>
       <span><kbd>Tab</kbd></span><span>Your own journal</span>
       <span><kbd>Esc</kbd></span><span>Pause</span>
+      <span><kbd>O</kbd></span><span>Contact shading on or off (turn off if it runs slowly)</span>
     </div>`;
   }
 

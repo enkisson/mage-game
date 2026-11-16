@@ -148,6 +148,7 @@ const CHECKS = {
     // and a creature thrown up by one is hurt when it lands
     g.debug.teleport(0, -60);
     const e = g.debug.spawn('drowned', 0, -68); g.debug.advance(1.3);
+    e.apply({ stagger: 2 }); // hold it still, so the test is about the fall and not the aim
     g.debug.lookAt(e.position.x, e.position.y, e.position.z); g.debug.say('wind', 'wind'); g.debug.advance(4);
     return [peak - y0 > 2.5 && hp === 100 && plain < 100 && e.hp < 80,
       JSON.stringify({ rose: +(peak - y0).toFixed(1), dropped: +dropped.toFixed(1), hpAfterUpdraft: hp, hpAfterPlainFall: Math.round(plain), creatureHp: Math.round(e.hp) })];`,

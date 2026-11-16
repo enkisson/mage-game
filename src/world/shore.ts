@@ -403,9 +403,9 @@ function grassTexture(seed: number): THREE.Texture {
     const x1 = x0 + lean * len * 0.55, y1 = S - len;
     const tone = rnd();
     const g = ctx.createLinearGradient(x0, S, x1, y1);
-    g.addColorStop(0, `rgb(${62 + tone * 26}, ${66 + tone * 26}, ${36 + tone * 12})`);
-    g.addColorStop(0.6, `rgb(${104 + tone * 34}, ${104 + tone * 30}, ${58 + tone * 18})`);
-    g.addColorStop(1, `rgb(${150 + tone * 36}, ${142 + tone * 32}, ${92 + tone * 22})`);
+    g.addColorStop(0, `rgb(${40 + tone * 18}, ${42 + tone * 18}, ${26 + tone * 10})`);
+    g.addColorStop(0.55, `rgb(${88 + tone * 30}, ${88 + tone * 26}, ${52 + tone * 16})`);
+    g.addColorStop(1, `rgb(${128 + tone * 32}, ${122 + tone * 28}, ${82 + tone * 20})`);
     ctx.strokeStyle = g;
     ctx.lineWidth = 2.2 + rnd() * 2.6;
     ctx.beginPath();
@@ -521,6 +521,9 @@ export function buildShore(models: Models): Level {
   // --- rocks -----------------------------------------------------------------------------
   const boulder = models.piece('boulder', 'boulder');
   const slab = models.piece('slab', 'rock');
+  // one kind of stone: pull the scanned rocks toward the colour of the bluff they fell from
+  if (boulder) (boulder.material as THREE.MeshStandardMaterial).color.setRGB(0.66, 0.6, 0.62);
+  if (slab) (slab.material as THREE.MeshStandardMaterial).color.setRGB(1.5, 1.25, 1.15);
   /** A boulder about `radius` across. Scanned if the model loaded, otherwise built from noise. */
   const stone = (seed: number, x: number, z: number, radius: number, stretch: [number, number, number] = [1, 0.8, 1], sink = 0.25, yaw = 0) => {
     if (boulder) {
@@ -596,9 +599,11 @@ export function buildShore(models: Models): Level {
     // a hatch cover, torn loose, makes a gangway from the sand up over the low rail
     const top = onShip(-0.4, 2.02, -2.5);
     const foot = new THREE.Vector3(top.x + 0.6, 0, top.z + 6.2);
-    seatInGround(MATERIALS.wood, 0.1);
+    seatInGround(MATERIALS.wood, 0.16);
+    // its foot has worked down into the sand, and a little has drifted over the end
+    mounds.push({ x: foot.x, z: foot.z + 0.4, r: 2.1, h: 0.14 });
     later.push(() => {
-      foot.y = ground(foot.x, foot.z) - 0.08;
+      foot.y = ground(foot.x, foot.z) - 0.2;
       solid.add(plank(foot, top.clone().add(new THREE.Vector3(-0.05, 0.02, -0.45)), 2.3, MATERIALS.wood));
     });
     landmarks.gangwayFoot = foot;
@@ -781,6 +786,7 @@ export function buildShore(models: Models): Level {
     inst.castShadow = false;
     inst.receiveShadow = true;
     inst.userData.noCollide = true;
+    inst.userData.noShade = true;
     root.add(inst);
   });
 
@@ -921,6 +927,7 @@ export function buildShore(models: Models): Level {
   sea.rotation.x = -Math.PI / 2;
   sea.renderOrder = 2;
   sea.userData.noCollide = true;
+  sea.userData.noShade = true;
   sea.receiveShadow = true;
   root.add(sea);
 
