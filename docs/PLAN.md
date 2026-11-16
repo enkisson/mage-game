@@ -1,6 +1,6 @@
 # Gloamtide: game plan
 
-Status: **v0.2, direction agreed, building the first playable slice.** Sections marked *provisional*
+Status: **v0.2, direction agreed. The first playable slice (the Wreck Shore) is built and on its second pass.** Sections marked *provisional*
 are my proposals and easy to change; everything else reflects decisions you have made.
 
 ## The pitch
@@ -65,6 +65,11 @@ beyond his.
 
 Your right hand moves between the trackpad and the arrow keys. That is deliberate: you choose a
 moment to speak, then you aim and release. You can keep moving with your left hand the whole time.
+
+On screen, the first word of a sentence forms in your character's left hand and the second in the
+right. Each sigil has its own hand sign (a cupped palm for Fire, a fist for Stone, two raised
+fingers for Wind, a flat palm for Push), and each kind of spell has its own cast gesture. The
+sigils you have bound are marked on the backs of your hands and flare when spoken.
 
 ### Why you cannot spam
 
@@ -145,7 +150,8 @@ summit above the clouds. Journal teachings are what you learn the *first* time y
 The path is sealed by a ward. The Gloam come in two or three groups from marked places, some of
 them above or below you. The ground always offers a choice: a ledge that is safe from chasers but
 exposed to spitters, a bridge that is a chokepoint and a trap, a ramp that is the only way up.
-Enemies that are knocked off heights take fall damage, and so do you.
+Enemies that are knocked off heights take fall damage, and so do you, with one exception: you
+always land safely after riding an updraft.
 
 After a stand you find one **charm**: a small boost for this run only (more focus, a wider blast,
 a second dodge). Charms are lost when you die.
@@ -213,7 +219,7 @@ the code and scenes would be rebuilt. We agreed to treat that as a later project
 | Milestone | Scope | Done when |
 | --- | --- | --- |
 | M0 Plan | Plan, concept art, look-dev kit | Done |
-| **M1 First playable: the Wreck Shore** | Movement with real 3D collision, trackpad look, sigil sentences (Fire, Push, Stone, Wind), the Drowned and Spitters with height-aware pathing, one wave stand, a journal that teaches a sigil, death and return, a realistic first pass on the shore | You can play the shore, learn a word, die, and come back knowing it |
+| **M1 First playable: the Wreck Shore** | Movement with real 3D collision, trackpad look, sigil sentences (Fire, Push, Stone, Wind), the Drowned and Spitters with height-aware pathing, one wave stand, a journal that teaches a sigil, death and return, a realistic first pass on the shore | Done, and a second pass: rigged hands with signs and cast gestures, the scanned ship and shore |
 | M2 The loop | Binding screen, your own journal, charms, camps, guardian fight, the full Wreck Shore with three stands | One complete biome, start to camp |
 | M3 The first act | Salt Marsh, Storm Coast, Drowned Forest; Pull and the remaining enemies | Four biomes in a row feel like a journey |
 | M4 The second act | Bone Canyon to Sunken Academy; Ice, Break, Bind; all 44 sentences | Eight biomes, the whole pool of sigils |
@@ -222,10 +228,13 @@ the code and scenes would be rebuilt. We agreed to treat that as a later project
 
 ## Open questions
 
-Nothing blocks M1. These are for when you have played it:
+Settled so far: the controls feel right on a trackpad; Fire is the first word; the body on the
+shore is what the mage shed when the Gloam took him.
 
-1. Does composing on the arrow keys and casting with a click feel right on your trackpad?
-2. Is Fire the right first word, or should the shore teach something else?
-3. How punishing should falls be, for you and for them?
-4. How should the body on the shore be explained when you meet the mage alive at the summit?
-   My proposal: the body is what he shed when the Gloam took him.
+For the next play-through:
+
+1. Do the hand signs and cast gestures feel clean in motion? Which feel slow or wrong?
+2. Does the beached galleon suit the wreck, or should it be more broken up?
+3. Is the stand in the cove too easy, too hard, or about right?
+4. Creatures are the last placeholders. Stay with code-built ones for now, or look at paid or
+   generated models?
