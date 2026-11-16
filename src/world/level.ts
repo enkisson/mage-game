@@ -57,6 +57,8 @@ export interface Level {
   stands: StandDef[];
   bounds: { minX: number; maxX: number; minZ: number; maxZ: number };
   waterLevel: number;
+  /** Named places worth pointing at: for hints, and for the automated playtest. */
+  landmarks: Record<string, THREE.Vector3>;
   /** Called every frame for things like water and flames. */
   update?: (time: number, dt: number) => void;
 }

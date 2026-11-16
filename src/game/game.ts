@@ -20,7 +20,7 @@ import { SIGILS, type SigilId } from '../magic/sigils';
 import { Effects } from '../fx/effects';
 import { Hud } from '../ui/hud';
 import { createSky, loadPhotoSky, type NightSky } from './sky';
-import { loadTextures } from '../art/materials';
+import type { Models } from '../art/models';
 import { emptyKnowledge, learnSigil, loadKnowledge, saveKnowledge, type Knowledge } from './save';
 import { GESTURES, HOLD, IDLE, type GestureName } from '../player/poses';
 import type { ArmPose } from '../player/hands';
@@ -77,7 +77,7 @@ export class Game {
   /** Resolves once the hand models are in. */
   handsReady: Promise<boolean> = Promise.resolve(false);
 
-  constructor(private container: HTMLElement) {
+  constructor(private container: HTMLElement, models: Models) {
     this.renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     this.renderer.shadowMap.enabled = true;
@@ -96,7 +96,7 @@ export class Game {
     this.fx = new Effects(scene);
 
     // the level
-    this.level = buildShore();
+    this.level = buildShore(models);
     scene.add(this.level.root);
     this.world.waterLevel = this.level.waterLevel;
     this.world.addCollider(this.level.collision);
@@ -155,9 +155,8 @@ export class Game {
     this.hud.showTitle(this.knowledge, () => this.begin());
     this.view.update(0, this.player, false);
 
-    // scanned textures and sky arrive when they arrive; the game is playable before then
+    // the sky and the hands arrive a moment later; nothing waits on them
     const assets = import.meta.env.BASE_URL + 'assets/';
-    void loadTextures(assets, this.renderer.capabilities.getMaxAnisotropy());
     this.handsReady = this.view.loadHands(assets + 'hands/');
     void loadPhotoSky(scene, this.renderer, this.sky, { url: assets + 'sky/night.jpg', rotation: 2.2, backgroundIntensity: 0.26, lightIntensity: 0.5, fog: 0x211f2b });
   }

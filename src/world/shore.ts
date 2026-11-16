@@ -1,6 +1,6 @@
 // Night I: the Wreck Shore.
-// A beach under a bluff, the broken hull as ramps and decks, a ravine, and a cove with a ledge
-// and an outcrop where the first stand is fought.
+// A beach under a bluff with your ship aground on it, a ravine, and a cove with a ledge and
+// an outcrop where the first stand is fought.
 //
 // Axes: +x east, +z south (out to sea), -z inland. Sea level is y = 0.
 import * as THREE from 'three';
@@ -8,6 +8,7 @@ import { clamp, smoothstep, fbm, rng, distToSegment } from '../core/math';
 import { mergeForCollision } from './world';
 import type { Level, JournalDef, StandDef } from './level';
 import { MATERIALS, waterRipples } from '../art/materials';
+import { centred, type Models } from '../art/models';
 
 export const COVE = { x: 0, z: -70, r: 26 };
 const BOUNDS = { minX: -62, maxX: 62, minZ: -112, maxZ: 62 };
@@ -194,16 +195,6 @@ function bowWreck(): THREE.Group {
   return g;
 }
 
-function beam(from: THREE.Vector3, to: THREE.Vector3, radius: number, material: THREE.Material): THREE.Mesh {
-  const len = from.distanceTo(to);
-  const m = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius * 1.1, len, 10), material);
-  m.position.copy(from).lerp(to, 0.5);
-  m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), to.clone().sub(from).normalize());
-  m.castShadow = true;
-  m.receiveShadow = true;
-  return m;
-}
-
 /** The robed body at the waterline. */
 function body(): THREE.Group {
   const g = new THREE.Group();
@@ -249,66 +240,294 @@ function tidePool(radius: number): THREE.Group {
   return g;
 }
 
-export function buildShore(): Level {
+/** A plank laid from one point to another. */
+function plank(from: THREE.Vector3, to: THREE.Vector3, width: number, material: THREE.Material): THREE.Mesh {
+  const dir = to.clone().sub(from);
+  const len = dir.length();
+  dir.normalize();
+  const side = new THREE.Vector3().crossVectors(dir, new THREE.Vector3(0, 1, 0)).normalize();
+  const up = new THREE.Vector3().crossVectors(side, dir);
+  const m = box(len, 0.16, width, material, [0, 0, 0]);
+  m.position.copy(from).lerp(to, 0.5);
+  m.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(dir, up, side));
+  return m;
+}
+
+const grassTime = { value: 0 };
+
+/** A clump of marram grass painted onto a card: pale straw blades fanning from the root. */
+function grassTexture(seed: number): THREE.Texture {
+  const S = 256;
+  const c = document.createElement('canvas');
+  c.width = c.height = S;
+  const ctx = c.getContext('2d')!;
+  const rnd = rng(seed);
+  ctx.lineCap = 'round';
+  for (let i = 0; i < 70; i++) {
+    const lean = (rnd() - 0.5) * 1.5;
+    const len = S * (0.45 + rnd() * 0.5);
+    const x0 = S / 2 + (rnd() - 0.5) * S * 0.28;
+    const x1 = x0 + lean * len * 0.55, y1 = S - len;
+    const tone = rnd();
+    const g = ctx.createLinearGradient(x0, S, x1, y1);
+    g.addColorStop(0, `rgb(${62 + tone * 26}, ${66 + tone * 26}, ${36 + tone * 12})`);
+    g.addColorStop(0.6, `rgb(${104 + tone * 34}, ${104 + tone * 30}, ${58 + tone * 18})`);
+    g.addColorStop(1, `rgb(${150 + tone * 36}, ${142 + tone * 32}, ${92 + tone * 22})`);
+    ctx.strokeStyle = g;
+    ctx.lineWidth = 2.2 + rnd() * 2.6;
+    ctx.beginPath();
+    ctx.moveTo(x0, S);
+    ctx.quadraticCurveTo(x0 + lean * len * 0.1, S - len * 0.6, x1, y1);
+    ctx.stroke();
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  return tex;
+}
+
+/** Three crossed cards rooted at the origin, lit as if they were part of the ground. */
+function grassGeometry(): THREE.BufferGeometry {
+  const pos: number[] = [], uv: number[] = [], nor: number[] = [], idx: number[] = [];
+  for (let k = 0; k < 3; k++) {
+    const a = (k / 3) * Math.PI;
+    const dx = Math.cos(a) * 0.5, dz = Math.sin(a) * 0.5;
+    const o = pos.length / 3;
+    pos.push(-dx, 0, -dz, dx, 0, dz, dx, 1, dz, -dx, 1, -dz);
+    uv.push(0, 0, 1, 0, 1, 1, 0, 1);
+    for (let n = 0; n < 4; n++) nor.push(0, 1, 0);
+    idx.push(o, o + 1, o + 2, o, o + 2, o + 3);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  g.setIndex(idx);
+  return g;
+}
+
+/** Grass that leans with the wind: the higher up the blade, the further it moves. */
+function grassMaterial(seed: number): THREE.MeshStandardMaterial {
+  const m = new THREE.MeshStandardMaterial({ map: grassTexture(seed), alphaTest: 0.35, side: THREE.DoubleSide, roughness: 1, metalness: 0 });
+  m.onBeforeCompile = (shader) => {
+    shader.uniforms.uTime = grassTime;
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nuniform float uTime;')
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+        vec4 swayAt = modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0);
+        float swayPhase = uTime * 1.6 + swayAt.x * 0.45 + swayAt.z * 0.6;
+        float gust = sin(swayPhase) * 0.6 + sin(swayPhase * 2.3 + 1.3) * 0.25 + sin(uTime * 0.4 + swayAt.x * 0.05) * 0.5;
+        float lift = position.y * position.y;
+        transformed.x += gust * lift * 0.22;
+        transformed.z += gust * lift * 0.13;`);
+    // both faces of a blade catch the sky the same way
+    shader.fragmentShader = shader.fragmentShader.replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\n        normal = normalize(vNormal);');
+  };
+  return m;
+}
+
+export function buildShore(models: Models): Level {
   const root = new THREE.Group();
   const solid = new THREE.Group(); // everything you can stand on or bump into
   root.add(solid);
   const r = rng(11);
   const ground = (x: number, z: number) => shoreHeight(x, z);
+  const hidden = new THREE.MeshBasicMaterial({ visible: false });
 
   solid.add(terrain(0.8));
 
-  // --- the wreck -------------------------------------------------------------------------
-  const stern = sternWreck();
-  stern.group.position.set(-13, ground(-13, 3) - 0.35, 3);
-  stern.group.rotation.set(0.03, 0.3, 0.05);
-  solid.add(stern.group);
-  stern.group.updateMatrixWorld(true);
-  const deckJournal = stern.group.localToWorld(stern.journalSpot.clone());
-
-  const bow = bowWreck();
-  bow.position.set(13, ground(13, -7) - 0.4, -7);
-  bow.rotation.set(0, -0.5, 0.04);
-  solid.add(bow);
+  /** Set a scanned object on the ground, with a simple shape wrapped round it to bump into. */
+  const prop = (src: THREE.Mesh, key: string, x: number, z: number, scale: number | [number, number, number], yaw: number,
+    { sink = 0.2, tilt = 0, collide = true, parent = root as THREE.Object3D, y = NaN } = {}): THREE.Mesh => {
+    const m = new THREE.Mesh(src.geometry, src.material);
+    const sc = typeof scale === 'number' ? [scale, scale, scale] : scale;
+    m.scale.set(sc[0], sc[1], sc[2]);
+    const height = src.geometry.boundingBox!.max.y * sc[1];
+    m.position.set(x, (Number.isNaN(y) ? ground(x, z) : y) - height * sink, z);
+    m.rotation.set(tilt, yaw, tilt * 0.6);
+    m.castShadow = true;
+    m.receiveShadow = true;
+    m.userData.noCollide = true;
+    parent.add(m);
+    if (collide) {
+      const proxy = new THREE.Mesh(models.hull(src, key), hidden);
+      proxy.position.copy(m.position);
+      proxy.rotation.copy(m.rotation);
+      proxy.scale.copy(m.scale);
+      (parent === root ? solid : parent).add(proxy);
+    }
+    return m;
+  };
 
   // --- rocks -----------------------------------------------------------------------------
-  const place = (m: THREE.Mesh, x: number, z: number, sink = 0.35, yaw = 0) => {
+  const boulder = models.piece('boulder', 'boulder');
+  const slab = models.piece('slab', 'rock');
+  /** A boulder about `radius` across. Scanned if the model loaded, otherwise built from noise. */
+  const stone = (seed: number, x: number, z: number, radius: number, stretch: [number, number, number] = [1, 0.8, 1], sink = 0.25, yaw = 0) => {
+    if (boulder) {
+      const k = radius / 1.25;
+      prop(boulder, 'boulder', x, z, [k * stretch[0], k * stretch[1] * 1.35, k * stretch[2]], yaw + seed, { sink });
+      return;
+    }
+    const m = rock(seed, radius, stretch);
     m.geometry.computeBoundingSphere();
     m.position.set(x, ground(x, z) - sink * m.geometry.boundingSphere!.radius, z);
     m.rotation.y = yaw;
-    // darken whatever sits in the tide
     const blend = m.geometry.attributes.blend, pos = m.geometry.attributes.position;
     for (let i = 0; i < pos.count; i++) blend.setY(i, smoothstep(1.3, 0.1, pos.getY(i) + m.position.y));
     solid.add(m);
-    return m;
   };
-  // sea stacks
-  const stack = place(rock(1, 3.4, [1, 1.7, 1]), -29, 7, 0.1);
-  place(rock(2, 3.0, [1, 1.9, 0.9]), 24, 31, 0.2, 1);
-  place(rock(3, 4.2, [1.1, 1.5, 1]), -10, 46, 0.2, 2);
-  place(rock(4, 2.6, [1, 1.2, 1.2]), 31, 12, 0.3, 0.5);
-  place(rock(5, 2.2, [1.3, 0.9, 1]), 9, 36, 0.3, 4);
-  // the fallen mast is a bridge from the quarterdeck to the western sea stack
-  const mastFrom = stern.group.localToWorld(new THREE.Vector3(-6.2, 4.72, -1.4));
-  const mastTo = new THREE.Vector3(-27.6, stack.position.y + 3.4 * 1.7 * 0.93, 6.4);
-  solid.add(beam(mastFrom, mastTo, 0.42, MATERIALS.woodDark));
 
-  // boulders along the foot of the bluff, with the ravine mouth left open
+  // sea stacks
+  stone(1, -31, 9, 3.2, [1, 1.7, 1], 0.1);
+  stone(2, 24, 31, 3.0, [1, 1.9, 0.9], 0.2, 1);
+  stone(3, -10, 46, 4.2, [1.1, 1.5, 1], 0.2, 2);
+  stone(4, 31, 12, 2.6, [1, 1.2, 1.2], 0.3, 0.5);
+  stone(5, 12, 37, 2.2, [1.3, 0.9, 1], 0.3, 4);
+  // along the foot of the bluff, with the ravine mouth left open
   for (let i = 0; i < 16; i++) {
     const x = -44 + i * 5.8 + (r() - 0.5) * 3;
     if (Math.abs(x - pathX(-22)) < 6.5) continue;
-    place(rock(10 + i, 0.9 + r() * 1.5, [1 + r() * 0.4, 0.7 + r() * 0.4, 1 + r() * 0.3]), x, -19 + (r() - 0.5) * 5, 0.3, r() * 6);
+    stone(10 + i, x, -19 + (r() - 0.5) * 5, 0.9 + r() * 1.5, [1 + r() * 0.4, 0.7 + r() * 0.4, 1 + r() * 0.3], 0.3, r() * 6);
   }
   // scattered on the beach
-  for (let i = 0; i < 9; i++) place(rock(40 + i, 0.4 + r() * 0.7), -34 + r() * 68, -8 + r() * 30, 0.4, r() * 6);
+  for (let i = 0; i < 9; i++) stone(40 + i, -36 + r() * 72, -9 + r() * 30, 0.35 + r() * 0.6, [1, 0.8, 1], 0.4, r() * 6);
   // cover inside the cove
-  place(rock(60, 2.4, [1.1, 0.9, 1]), 2, -68, 0.25, 1.2);
-  place(rock(61, 1.5), -6.5, -79, 0.3, 2.2);
-  place(rock(62, 1.7, [1.2, 0.8, 1]), 11, -59.5, 0.3, 0.4);
-  place(rock(63, 1.2), -3, -56, 0.35, 3);
+  stone(60, 2, -68, 2.4, [1.1, 0.9, 1], 0.25, 1.2);
+  stone(61, -6.5, -79, 1.5, [1, 0.8, 1], 0.3, 2.2);
+  stone(62, 11, -59.5, 1.7, [1.2, 0.8, 1], 0.3, 0.4);
+  stone(63, -3, -56, 1.2, [1, 0.8, 1], 0.35, 3);
   // in the ravine
-  place(rock(64, 1.1), pathX(-33) + 3.4, -33, 0.3, 1);
-  place(rock(65, 0.9), pathX(-38) - 3.2, -38.5, 0.3, 2);
+  stone(64, pathX(-33) + 3.4, -33, 1.1, [1, 0.8, 1], 0.3, 1);
+  stone(65, pathX(-38) - 3.2, -38.5, 0.9, [1, 0.8, 1], 0.3, 2);
+  // flat slabs of slate lying about
+  if (slab) {
+    const slabs: [number, number, number][] = [[-22, -12, 22], [19, -14, 18], [9, 20, 14], [-16, 21, 16], [pathX(-28) - 2.6, -28, 13], [16, -52, 20], [-9, -62, 15], [27, -6, 24], [-38, 2, 20]];
+    slabs.forEach(([x, z, k], i) => prop(slab, 'slab', x, z, [k, k * 1.3, k], i * 1.9, { sink: 0.3, tilt: (r() - 0.5) * 0.2 }));
+  }
+
+  // --- the wreck -------------------------------------------------------------------------
+  let deckJournal: THREE.Vector3;
+  const landmarks: Record<string, THREE.Vector3> = {};
+  const shipModel = models.clone('ship');
+  if (shipModel) {
+    // your ship, driven broadside onto the sand and heeled toward the sea
+    const ship = new THREE.Group();
+    ship.add(shipModel);
+    ship.scale.setScalar(1.25);
+    ship.rotation.order = 'YXZ';
+    ship.rotation.set(-0.25, Math.PI + 0.1, 0.03);
+    ship.position.set(-5, ground(-5, 6) - 1.1, 6);
+    shipModel.traverse((o) => { if (!o.name.includes('hull')) o.userData.noCollide = true; });
+    solid.add(ship);
+    ship.updateMatrixWorld(true);
+    const onShip = (x: number, y: number, z: number) => ship.localToWorld(new THREE.Vector3(x, y, z));
+
+    // a hatch cover, torn loose, makes a gangway from the sand up over the low rail
+    const top = onShip(-0.4, 2.02, -2.5);
+    const foot = new THREE.Vector3(top.x + 0.6, 0, top.z + 6.2);
+    foot.y = ground(foot.x, foot.z) - 0.05;
+    solid.add(plank(foot, top.clone().add(new THREE.Vector3(-0.05, 0.02, -0.45)), 2.3, MATERIALS.wood));
+    landmarks.gangwayFoot = foot.clone();
+    landmarks.gangwayTop = top.clone();
+    landmarks.deck = onShip(0.6, 1.75, 0);
+
+    // sea chests lashed on deck: steps up to the quarterdeck
+    const crate = models.piece('crate', 'wooden_crate_01');
+    if (crate) {
+      prop(crate, 'crate', -2.2, 1.2, 1.55, Math.PI / 2, { sink: 0, parent: ship, y: 1.7 });
+      prop(crate, 'crate', -3.05, 1.2, 1.55, Math.PI / 2, { sink: 0, parent: ship, y: 1.7 });
+      prop(crate, 'crate', -3.05, 1.2, 1.55, Math.PI / 2 + 0.2, { sink: 0, parent: ship, y: 2.24 });
+    }
+    deckJournal = onShip(1.9, 1.86, 0.55);
+  } else {
+    // no ship model: a wreck of planks instead
+    const stern = sternWreck();
+    stern.group.position.set(-13, ground(-13, 3) - 0.35, 3);
+    stern.group.rotation.set(0.03, 0.3, 0.05);
+    solid.add(stern.group);
+    stern.group.updateMatrixWorld(true);
+    deckJournal = stern.group.localToWorld(stern.journalSpot.clone());
+    const bow = bowWreck();
+    bow.position.set(13, ground(13, -7) - 0.4, -7);
+    bow.rotation.set(0, -0.5, 0.04);
+    solid.add(bow);
+  }
+
+  // --- what the sea threw up the beach -----------------------------------------------------
+  const barrelA = models.piece('barrels', 'barrel01');
+  const barrelB = models.piece('barrels', 'barrel02');
+  if (barrelA) {
+    prop(barrelA, 'barrelA', 6.5, 16.5, 1.15, 0.4, { sink: 0.12, tilt: 0.12 });
+    prop(barrelA, 'barrelA', -15, 17, 1.15, 2.1, { sink: 0.3, tilt: -0.2 });
+  }
+  if (barrelB) prop(barrelB, 'barrelB', 10.5, 21.5, 1.15, 1.2, { sink: 0.35, tilt: 1.35 });
+  const staves = models.pieces('barrels').filter((m) => m.name.includes('piece')).map((m) => centred(m));
+  staves.forEach((s2, i) => {
+    const a = i * 2.4, d = 2 + (i % 5) * 1.3;
+    prop(s2, `stave${i}`, 4 + Math.cos(a) * d * 1.6, 18.5 + Math.sin(a) * d, 1.2, a * 1.7, { sink: 0.3, tilt: (i % 3 - 1) * 0.25, collide: false });
+  });
+  const chest = models.piece('crate', 'wooden_crate_01');
+  if (chest) {
+    prop(chest, 'crate', 8.6, 13.2, 1.5, 0.7, { sink: 0.25, tilt: 0.16 });
+    prop(chest, 'crate', -20, 13.5, 1.5, 2.6, { sink: 0.4, tilt: -0.3 });
+  }
+  const branches = models.pieces('branches').map((m) => centred(m));
+  if (branches.length) {
+    const wood: [number, number, number][] = [[-7, 27.2, 2.2], [14, 26.4, 1.8], [-24, 25.5, 2.4], [27, 23, 2], [1, 28.6, 1.6], [-33, 18, 2.2], [20, -15, 2.4], [-13, -16, 2], [pathX(-30) + 2, -30, 1.8], [-8, -55, 2.2], [15, -73, 2]];
+    wood.forEach(([x, z, k], i) => prop(branches[i % branches.length], `branch${i}`, x, z, k, i * 2.3, { sink: 0.15, collide: false }));
+  }
+
+  // --- what grows here ---------------------------------------------------------------------
+  // marram grass in clumps: thick at the foot of the bluff, along the ravine, round the cove
+  const flat = (x: number, z: number) => Math.abs(ground(x + 0.6, z) - ground(x - 0.6, z)) + Math.abs(ground(x, z + 0.6) - ground(x, z - 0.6)) < 0.5;
+  const clumpCentre = (): [number, number] | null => {
+    const kind = r();
+    let x: number, z: number;
+    if (kind < 0.55) {
+      x = -42 + r() * 84;
+      z = -21 + Math.pow(r(), 1.6) * 25;
+      if (Math.abs(x - pathX(-22)) < 4 && z < -13) return null;
+    } else if (kind < 0.72) {
+      z = -24 - r() * 20;
+      x = pathX(z) + (r() < 0.5 ? -1 : 1) * (2.6 + r() * 1.4);
+    } else {
+      const a = r() * Math.PI * 2, d = r() < 0.7 ? 18.5 + r() * 4.5 : 5 + r() * 14;
+      x = COVE.x + Math.cos(a) * d;
+      z = COVE.z + Math.sin(a) * d;
+    }
+    if (z > -1 && z < 13 && x > -24 && x < 12) return null; // not under the ship
+    return [x, z];
+  };
+  const tufts: [number, number, number][][] = [[], [], []];
+  for (let c = 0; c < 190; c++) {
+    const centre = clumpCentre();
+    if (!centre) continue;
+    const n = 4 + Math.floor(r() * 9);
+    for (let k = 0; k < n; k++) {
+      const a = r() * Math.PI * 2, d = Math.sqrt(r()) * 1.5;
+      const x = centre[0] + Math.cos(a) * d, z = centre[1] + Math.sin(a) * d;
+      if (ground(x, z) < 1.3 || !flat(x, z)) continue;
+      tufts[Math.floor(r() * 3)].push([x, z, 0.38 + r() * 0.45]);
+    }
+  }
+  const grassGeo = grassGeometry();
+  const dummy = new THREE.Object3D();
+  tufts.forEach((list, v) => {
+    if (!list.length) return;
+    const inst = new THREE.InstancedMesh(grassGeo, grassMaterial(31 + v * 7), list.length);
+    list.forEach(([x, z, k], n) => {
+      dummy.position.set(x, ground(x, z) - 0.03, z);
+      dummy.rotation.set(0, r() * 6.28, 0);
+      dummy.scale.set(k * 1.25, k, k * 1.25);
+      dummy.updateMatrix();
+      inst.setMatrixAt(n, dummy.matrix);
+    });
+    inst.castShadow = false;
+    inst.receiveShadow = true;
+    inst.userData.noCollide = true;
+    root.add(inst);
+  });
 
   // --- story objects ---------------------------------------------------------------------
   const bodySpot = new THREE.Vector3(4.2, ground(4.2, 22.5), 22.5);
@@ -331,10 +550,10 @@ export function buildShore(): Level {
       ],
     },
     {
-      id: 'shore-2', teaches: 'push', title: 'Written on the quarterdeck',
+      id: 'shore-2', teaches: 'push', title: 'Nailed to the mainmast',
       position: deckJournal,
       text: [
-        'They cannot climb. I learned that on this deck, with my back to the rail, watching them walk the long way round.',
+        'They cannot climb. I learned that on a deck like this one, with my back to the rail, watching them walk the long way round.',
         'High ground buys you time, never safety. So learn the second word: away. It is not a weapon. A cliff is a weapon. This only introduces them.',
         'A word alone is a gesture. Two together are a thought. Try it beside the first.',
       ],
@@ -392,13 +611,12 @@ export function buildShore(): Level {
 
   // --- walls at the edge of the world ----------------------------------------------------
   const walls = new THREE.Group();
-  const wallMat = new THREE.MeshBasicMaterial({ visible: false });
   const w = BOUNDS.maxX - BOUNDS.minX, d = BOUNDS.maxZ - BOUNDS.minZ;
   const cx = (BOUNDS.minX + BOUNDS.maxX) / 2, cz = (BOUNDS.minZ + BOUNDS.maxZ) / 2;
-  walls.add(box(w, 80, 1, wallMat, [cx, 20, BOUNDS.minZ + 1]));
-  walls.add(box(w, 80, 1, wallMat, [cx, 20, BOUNDS.maxZ - 6]));
-  walls.add(box(1, 80, d, wallMat, [BOUNDS.minX + 1, 20, cz]));
-  walls.add(box(1, 80, d, wallMat, [BOUNDS.maxX - 1, 20, cz]));
+  walls.add(box(w, 80, 1, hidden, [cx, 20, BOUNDS.minZ + 1]));
+  walls.add(box(w, 80, 1, hidden, [cx, 20, BOUNDS.maxZ - 6]));
+  walls.add(box(1, 80, d, hidden, [BOUNDS.minX + 1, 20, cz]));
+  walls.add(box(1, 80, d, hidden, [BOUNDS.maxX - 1, 20, cz]));
   walls.traverse((o) => { (o as THREE.Mesh).castShadow = false; });
 
   const collision = mergeForCollision([solid, walls]);
@@ -421,9 +639,11 @@ export function buildShore(): Level {
     stands: [stand],
     bounds: BOUNDS,
     waterLevel: 0,
+    landmarks,
     update(time) {
-      // the swell drifts shoreward
+      // the swell drifts shoreward, and the grass leans with the wind
       waterRipples.offset.set(time * 0.012, -time * 0.02);
+      grassTime.value = time;
     },
   };
 }

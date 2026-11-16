@@ -6,7 +6,7 @@ const path = require('path');
 const { chromium } = require('playwright');
 
 const dist = path.join(__dirname, '..', 'dist');
-const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.woff2': 'font/woff2', '.woff': 'font/woff', '.jpg': 'image/jpeg' };
+const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.woff2': 'font/woff2', '.woff': 'font/woff', '.jpg': 'image/jpeg', '.glb': 'model/gltf-binary' };
 
 // Each check runs in the page with `g` = the game, and returns [passed, detail].
 const CHECKS = {
@@ -21,6 +21,35 @@ const CHECKS = {
     g.input.inject('click'); g.debug.advance(0.3);
     return [before === 0 && reading === 'reading' && g.knowledge.sigils.join() === 'fire' && g.knowledge.bound[0] === 'fire'
       && g.knowledge.sentences.join() === 'fire' && g.player.focus < 100, JSON.stringify({ reading, k: g.knowledge, focus: Math.round(g.player.focus) })];`,
+
+  'the gangway leads up onto the ship, and the page on the mainmast teaches Push': `
+    g.debug.start(); g.debug.advance(2);
+    const page = g.level.journals.find((j) => j.id === 'shore-2').position;
+    const { gangwayFoot: foot, gangwayTop: top, deck } = g.level.landmarks;
+    // from the sand: up the gangway, over the rail onto the deck, then to the page
+    g.debug.teleport(foot.x, foot.z + 1.5);
+    const sand = g.player.position.y;
+    const walkTo = (p, seconds, hop) => {
+      let t = 0;
+      while (t < seconds && Math.hypot(g.player.position.x - p.x, g.player.position.z - p.z) > 0.7) {
+        g.debug.lookAt(p.x, g.player.position.y + 1.6, p.z);
+        g.input.hold('KeyW', true);
+        g.input.hold('Space', hop && Math.floor(t * 3) % 2 === 0);
+        g.debug.advance(0.1); t += 0.1;
+      }
+      g.input.hold('KeyW', false); g.input.hold('Space', false);
+      return t;
+    };
+    const t1 = walkTo(top, 6, false);
+    const onGangway = g.player.position.y - sand;
+    const t2 = walkTo(deck, 5, true);
+    const t3 = walkTo(page, 6, true);
+    g.debug.advance(0.3);
+    const near = g.player.position.distanceTo(page) < 2.7;
+    g.input.inject('key', 'KeyE'); g.debug.advance(0.1);
+    return [near && g.mode === 'reading' && g.knowledge.sigils.includes('push') && onGangway > 0.8,
+      JSON.stringify({ near, times: [t1, t2, t3].map((n) => +n.toFixed(1)), gangwayRise: +onGangway.toFixed(2), deckAboveSand: +(page.y - sand).toFixed(2), mode: g.mode,
+        at: g.player.position.toArray().map((n) => +n.toFixed(1)), page: page.toArray().map((n) => +n.toFixed(1)), top: top.toArray().map((n) => +n.toFixed(1)), foot: foot.toArray().map((n) => +n.toFixed(1)) })];`,
 
   'a third word is refused, and Backspace lets a sentence go': `
     g.debug.start(); g.debug.learnAll();

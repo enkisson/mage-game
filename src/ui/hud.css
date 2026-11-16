@@ -163,3 +163,10 @@ html, body { margin: 0; height: 100%; background: #05040c; overflow: hidden; }
   .vitals { width: 220px; left: 16px; bottom: 150px; }
   .toasts { right: 12px; top: 96px; }
 }
+
+/* ---- loading ---- */
+.loading { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 22px; background: #05040c; z-index: 5; }
+.loading .logo { font-family: var(--display); font-weight: 700; font-size: clamp(56px, 10vw, 110px); line-height: 0.9; text-shadow: 0 0 60px rgba(141, 255, 58, 0.25); }
+.loading .meter { width: min(360px, 70vw); height: 4px; background: rgba(226, 219, 198, 0.15); }
+.loading .meter i { display: block; height: 100%; width: 0; background: var(--gloam); box-shadow: 0 0 12px var(--gloam); transition: width 0.3s; }
+.loading .what { font-size: 16px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--bone-dim); }
