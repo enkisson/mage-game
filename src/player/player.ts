@@ -137,11 +137,15 @@ export class Player {
     }
   }
 
-  /** Thrown upward by an updraft or a rising pillar. */
+  /** Carried by an updraft: the air sets you down gently, so the next landing does no harm. */
+  private borne = false;
+
+  /** Thrown upward by an updraft. */
   launch(vy: number) {
     this.velocity.y = Math.max(this.velocity.y, vy);
     this.onGround = false;
     this.airTime = PLAYER.coyote;
+    this.borne = true;
   }
 
   update(dt: number, input: Input, world: World, canMove: boolean) {
@@ -243,9 +247,10 @@ export class Player {
       }
     }
 
-    if (this.landed > PLAYER.safeFallSpeed) {
+    if (this.landed > PLAYER.safeFallSpeed && !this.borne) {
       this.damage((this.landed - PLAYER.safeFallSpeed) * PLAYER.fallDamagePerSpeed, 'The fall broke you.');
     }
+    if (this.onGround) this.borne = false;
 
     this.safeTimer += dt;
     if (this.onGround && this.safeTimer > 0.4 && this.position.y > world.waterLevel + 0.25) {

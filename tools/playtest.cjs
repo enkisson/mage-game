@@ -100,6 +100,29 @@ const CHECKS = {
     g.debug.say('wind', 'push'); g.debug.advance(3);
     return [e.position.y < y0 - 3 && e.hp < 80, JSON.stringify({ fell: +(y0 - e.position.y).toFixed(1), hp: Math.round(e.hp) })];`,
 
+  'an updraft carries you up and sets you down unharmed, but still hurts what it throws': `
+    g.debug.start(); g.debug.learnAll();
+    g.stands[0].phase = 'won';
+    g.debug.teleport(13, -82); g.debug.advance(2);
+    // off the outcrop on an updraft: a 5 m outcrop plus the lift is a fall that would otherwise hurt
+    const y0 = g.player.position.y;
+    g.player.pitch = -1.3; g.debug.say('wind', 'wind');
+    let peak = y0, t = 0;
+    g.input.hold('KeyW', true);
+    while (t < 6) { g.debug.advance(0.1); t += 0.1; peak = Math.max(peak, g.player.position.y); }
+    g.input.hold('KeyW', false);
+    const dropped = y0 - g.player.position.y;
+    const hp = g.player.health;
+    // a plain fall from the same height does hurt
+    g.debug.teleport(13, -82); g.player.position.y += 9; g.debug.advance(3);
+    const plain = g.player.health;
+    // and a creature thrown up by one is hurt when it lands
+    g.debug.teleport(0, -60);
+    const e = g.debug.spawn('drowned', 0, -68); g.debug.advance(1.3);
+    g.debug.lookAt(e.position.x, e.position.y, e.position.z); g.debug.say('wind', 'wind'); g.debug.advance(4);
+    return [peak - y0 > 2.5 && hp === 100 && plain < 100 && e.hp < 80,
+      JSON.stringify({ rose: +(peak - y0).toFixed(1), dropped: +dropped.toFixed(1), hpAfterUpdraft: hp, hpAfterPlainFall: Math.round(plain), creatureHp: Math.round(e.hp) })];`,
+
   'the sea throws you back': `
     g.debug.start(); g.debug.advance(2); // let the moment of grace after waking pass
     g.player.position.set(0, -2.2, 50); g.debug.advance(1.2);

@@ -6,7 +6,7 @@ const path = require('path');
 const { chromium } = require('playwright');
 
 const dist = path.join(__dirname, '..', 'dist');
-const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.woff2': 'font/woff2', '.woff': 'font/woff', '.png': 'image/png', '.jpg': 'image/jpeg', '.hdr': 'application/octet-stream', '.glb': 'model/gltf-binary' };
+const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.woff2': 'font/woff2', '.woff': 'font/woff', '.png': 'image/png', '.jpg': 'image/jpeg', '.glb': 'model/gltf-binary' };
 
 // Each scenario runs inside the page with `g` = the game.
 const SCENARIOS = {
@@ -40,9 +40,23 @@ const SCENARIOS = {
   journal: `g.debug.start(); g.debug.teleport(4.4, 23.6, -0.6, -0.5); g.debug.advance(0.3); g.input.inject('key', 'KeyE'); g.debug.advance(0.1);`,
 };
 
+// The hand pose sheet: every held sign and every beat of every cast gesture.
+const POSES = [
+  ['idle', 'idle'], ['hold:fire', 'idle'], ['hold:stone', 'idle'], ['hold:wind', 'idle'], ['hold:push', 'idle'],
+  ['hold:fire', 'hold:push'], ['hold:stone', 'hold:wind'],
+  ['beat:thrust:0', 'idle'], ['beat:thrust:0', 'beat:thrust:0'], ['beat:hurl:0', 'idle'], ['beat:hurl:1', 'idle'],
+  ['beat:slash:0', 'idle'], ['beat:slash:1', 'idle'], ['beat:shove:0', 'beat:shove:0'],
+  ['beat:sweep:0', 'beat:sweep:0'], ['beat:sweep:1', 'beat:sweep:1'], ['beat:press:0', 'beat:press:0'],
+  ['beat:raise:0', 'beat:raise:0'], ['beat:raise:1', 'beat:raise:1'], ['beat:loft:0', 'beat:loft:0'], ['beat:loft:1', 'beat:loft:1'],
+];
+for (const [l, r] of POSES) {
+  SCENARIOS['pose-' + l.replace(/:/g, '_') + '--' + r.replace(/:/g, '_')] =
+    `g.debug.start(); g.debug.teleport(0, -20, 0, 0.05); g.debug.hands('${l}', '${r}'); g.debug.advance(0.1);`;
+}
+
 const args = process.argv.slice(2);
 const outDir = path.resolve(args.shift() || 'shots');
-const names = args.length ? args : Object.keys(SCENARIOS);
+const names = args.length ? args.flatMap((a) => (a === 'poses' ? Object.keys(SCENARIOS).filter((n) => n.startsWith('pose-')) : [a])) : Object.keys(SCENARIOS).filter((n) => !n.startsWith('pose-'));
 const size = { width: 1280, height: 720 };
 
 const server = http.createServer((req, res) => {
@@ -69,6 +83,7 @@ server.listen(0, async () => {
     await page.goto(`http://127.0.0.1:${port}/`);
     await page.waitForFunction('window.gloam !== undefined', null, { timeout: 60000 }).catch(() => errors.push('game never started'));
     await page.waitForTimeout(2500); // textures and sky
+    await page.evaluate('window.gloam.handsReady').catch(() => {});
     const t = Date.now();
     try {
       const info = await page.evaluate(`(() => { const g = window.gloam; ${SCENARIOS[name]}; g.debug.render();

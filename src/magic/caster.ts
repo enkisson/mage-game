@@ -79,7 +79,7 @@ export class Caster {
     game.player.spendFocus(spell.cost);
     this.busy = spell.recovery;
     this.sinceCast = 0;
-    game.view.release(true);
+    game.view.release(true, spell);
     this.sentence.length = 0;
     game.hud.setSentence(this.sentence, null, false);
 

@@ -305,9 +305,12 @@ export class Spells {
     const flat = new THREE.Vector3(aim.x, 0, aim.z).normalize();
     const hand = this.hand();
     if (e.visual === 'fire') {
-      game.fx.glow.emit(hand, { count: 150, color: FX_COLORS.fire, speed: [e.length * 0.9, e.length * 2.4], life: [0.25, 0.6], size: [0.6, 1.5], dir: aim, spread: e.halfAngle, drag: 2.6, gravity: -3, brightness: 1.5 });
-      game.fx.dust.emit(hand, { count: 24, color: FX_COLORS.smoke, speed: [e.length * 0.5, e.length * 1.4], life: [0.6, 1.2], size: [1, 2.4], dir: aim, spread: e.halfAngle, drag: 2.4, gravity: -1, grow: 2.4 });
-      game.fx.flash(hand.clone().addScaledVector(aim, 3), 0xff8a3a, 90, 16, 0.4);
+      // start the fire a stride ahead, so it rolls away from you instead of filling your eyes
+      const mouth = hand.clone().addScaledVector(aim, 1.3);
+      game.fx.glow.emit(mouth, { count: 110, color: FX_COLORS.fire, speed: [e.length * 0.9, e.length * 2.3], life: [0.25, 0.6], size: [0.35, 1.0], dir: aim, spread: e.halfAngle, drag: 2.6, gravity: -3, brightness: 1.0, radius: 0.5 });
+      game.fx.glow.emit(hand, { count: 16, color: FX_COLORS.ember, speed: [2, 9], life: [0.2, 0.5], size: [0.05, 0.14], dir: aim, spread: e.halfAngle, drag: 2, brightness: 2 });
+      game.fx.dust.emit(mouth, { count: 20, color: FX_COLORS.smoke, speed: [e.length * 0.5, e.length * 1.4], life: [0.6, 1.2], size: [1, 2.4], dir: aim, spread: e.halfAngle, drag: 2.4, gravity: -1, grow: 2.4 });
+      game.fx.flash(hand.clone().addScaledVector(aim, 4), 0xff8a3a, 45, 16, 0.4);
     } else if (e.visual === 'stone') {
       // spikes erupt in a line, a beat apart
       const n = Math.ceil(e.length / 1.6);
