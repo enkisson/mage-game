@@ -143,7 +143,8 @@ export class HandRig {
     holder.applyMatrix4(inv);
     this.root.add(holder);
     for (const f of FINGERS) {
-      const k = p(`${f}-phalanx-proximal`).applyMatrix4(inv);
+      // the model now sits inside our frame, so joint positions are already in it
+      const k = p(`${f}-phalanx-proximal`);
       this.knuckles.push(new THREE.Vector3(k.x, k.y - 0.024, k.z - 0.0125));
     }
     this.root.traverse((o) => { o.userData.noCollide = true; });
