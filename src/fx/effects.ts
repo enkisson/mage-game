@@ -118,6 +118,9 @@ class Cloud {
     geo.setDrawRange(0, 0);
   }
 
+  /** Scales how many particles each burst makes. */
+  density = 1;
+
   emit(origin: THREE.Vector3, e: Emit) {
     const two = Array.isArray(e.color);
     _c1.set(two ? (e.color as number[])[0] : (e.color as number));
@@ -127,7 +130,8 @@ class Cloud {
       _axis.copy(e.dir).normalize();
       _q.setFromUnitVectors(UP, _axis);
     }
-    for (let k = 0; k < e.count; k++) {
+    const count = e.count <= 1 || this.density >= 1 ? e.count : Math.max(1, Math.round(e.count * this.density));
+    for (let k = 0; k < count; k++) {
       if (this.n >= MAX) return;
       const i = this.n++;
       // direction
@@ -311,6 +315,12 @@ export class Effects {
     this.addTransient(mesh, life, (t, m) => {
       (m.material as THREE.MeshBasicMaterial).opacity = 0.85 * Math.min(1, t * 30) * (1 - Math.max(0, (t - 0.6) / 0.4));
     });
+  }
+
+  /** Fewer particles everywhere, for slower machines. */
+  set density(d: number) {
+    this.glow.density = d;
+    this.dust.density = d;
   }
 
   resize(height: number, fovDeg: number) {

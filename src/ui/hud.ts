@@ -262,7 +262,7 @@ export class Hud {
       <span><kbd>E</kbd></span><span>Read a journal page</span>
       <span><kbd>Tab</kbd></span><span>Your own journal</span>
       <span><kbd>Esc</kbd></span><span>Pause</span>
-      <span><kbd>O</kbd></span><span>Contact shading on or off (turn off if it runs slowly)</span>
+      <span><kbd>O</kbd></span><span>Effects full or light (use light if it runs slowly)</span>
     </div>`;
   }
 
@@ -282,12 +282,13 @@ export class Hud {
     (this.overlayEl.querySelector('#start') as HTMLElement).onclick = onStart;
   }
 
-  showPaused(k: Knowledge, actions: { resume: () => void; learnAll: () => void; forget: () => void }) {
+  showPaused(k: Knowledge, actions: { resume: () => void; learnAll: () => void; forget: () => void; effects: 'full' | 'light'; toggleEffects: () => void }) {
     this.show('paused', `<div class="menu">
       <h2>Paused</h2>
       <button class="start" id="resume">Return</button>
       ${this.controls()}
       <div class="links">
+        <button id="effects">Effects: ${actions.effects === 'full' ? 'full (switch to light if it runs slowly)' : 'light (switch to full)'}</button>
         ${k.sigils.length < 4 ? '<button id="learn">Know all four words now (for testing)</button>' : ''}
         <button id="forget">Forget everything and start over</button>
       </div>
@@ -296,6 +297,7 @@ export class Hud {
     const learn = this.overlayEl.querySelector('#learn') as HTMLElement | null;
     if (learn) learn.onclick = actions.learnAll;
     (this.overlayEl.querySelector('#forget') as HTMLElement).onclick = actions.forget;
+    (this.overlayEl.querySelector('#effects') as HTMLElement).onclick = actions.toggleEffects;
   }
 
   showDeath(k: Knowledge, cause: string) {

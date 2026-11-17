@@ -34,6 +34,12 @@ const SCENARIOS = {
   crewclose: `g.debug.start(); g.debug.learnAll(); g.stands[0].phase = 'won'; g.debug.teleport(0, -56, 0, -0.1);
     const e1 = g.debug.spawn('drowned', -0.9, -58.3); const e2 = g.debug.spawn('spitter', 1.1, -58.6);
     g.debug.advance(1.25);`,
+  nightship: `g.debug.start(); g.debug.night(1); g.debug.teleport(12, 12, 1.1, 0.25); g.debug.advance(0.3);`,
+  nightsea: `g.debug.start(); g.debug.night(1); g.debug.teleport(-4, 18, 2.6, -0.03); g.debug.advance(0.3);`,
+  nightcove: `g.debug.start(); g.debug.night(1); g.debug.learnAll(); g.stands[0].phase = 'won'; g.debug.teleport(0, -56, 0, -0.05);
+    for (const [k, x, z] of [['drowned', -1.6, -59.6], ['drowned', 0.2, -60.4], ['drowned', 1.7, -59.8], ['spitter', 3.4, -62.5]]) g.debug.spawn(k, x, z);
+    g.debug.advance(1.2); g.input.inject('key', 'ArrowUp'); g.debug.advance(0.5);`,
+  halfnight: `g.debug.start(); g.debug.night(0.5); g.debug.teleport(0, -24, 0, 0); g.debug.advance(0.3);`,
   fireball: `g.debug.start(); g.debug.learnAll(); g.debug.teleport(0, -56, 0, -0.08);
     for (const [x, z] of [[-2, -66], [1, -67], [3, -65], [0, -69]]) g.debug.spawn('drowned', x, z);
     g.debug.advance(1.4); g.debug.lookAt(0.5, 5.6, -66.5); g.debug.say('fire', 'fire'); g.debug.advance(0.5);`,

@@ -240,7 +240,7 @@ export function seatInGround<T extends THREE.MeshStandardMaterial>(m: T, reach: 
   return m;
 }
 
-export const seaUniforms = { uTime: { value: 0 } };
+export const seaUniforms = { uTime: { value: 0 }, uNight: { value: 0 } };
 
 /**
  * The sea. Each vertex knows how deep the water is under it, so the edge can be clear and
@@ -253,6 +253,7 @@ function seaMaterial(): THREE.MeshStandardMaterial {
   });
   m.onBeforeCompile = (shader) => {
     shader.uniforms.uTime = seaUniforms.uTime;
+    shader.uniforms.uNight = seaUniforms.uNight;
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', `#include <common>
         attribute float depth;
@@ -271,6 +272,8 @@ function seaMaterial(): THREE.MeshStandardMaterial {
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', `#include <common>
         uniform float uTime;
+        uniform float uNight;
+        float gSeaFoam;
         varying float vDepth;
         varying float vShoal;
         varying vec2 vShore;
@@ -293,10 +296,14 @@ function seaMaterial(): THREE.MeshStandardMaterial {
         // and white water where the swell meets a rock standing in it
         float wash = smoothstep(0.12, 0.6, vShoal + (lace - 0.5) * 0.6) * (0.7 + 0.3 * sin(uTime * 0.9 + vShore.x * 0.3));
         float foam = clamp(lip * 0.9 + streaks * 0.7 + wash, 0.0, 1.0);
+        gSeaFoam = foam;
         diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.62, 0.66, 0.7), foam);
         diffuseColor.a = mix(smoothstep(0.0, 0.5, d) * 0.5 + smoothstep(0.2, 1.4, d) * 0.45, 0.9, foam);`)
       .replace('#include <roughnessmap_fragment>', `
-        float roughnessFactor = mix(roughness, 0.85, foam);`);
+        float roughnessFactor = mix(roughness, 0.85, foam);`)
+      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+        // sea-fire: after dark the breaking water glows where it is stirred
+        totalEmissiveRadiance += vec3(0.03, 0.3, 0.36) * gSeaFoam * gSeaFoam * uNight * (0.6 + 0.4 * sin(uTime * 2.3 + vShore.x * 1.7));`);
   };
   return m;
 }

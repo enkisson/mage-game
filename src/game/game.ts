@@ -18,7 +18,8 @@ import { prepareCreatures } from '../art/creatures';
 import { Spells } from '../magic/spells';
 import { Caster } from '../magic/caster';
 import { SIGILS, type SigilId } from '../magic/sigils';
-import { Effects } from '../fx/effects';
+import { Effects, FX_COLORS } from '../fx/effects';
+import { seaUniforms } from '../art/materials';
 import { Hud } from '../ui/hud';
 import { createSky, loadPhotoSky, type NightSky } from './sky';
 import { GroundingPass } from './grounding';
@@ -81,6 +82,11 @@ export class Game {
   private reading: JournalDef | null = null;
   private seaClock = 0;
   private mistClock = 0;
+  /** How far the night has fallen, 0 to 1. It comes on as you go north, and with time. */
+  private night = 0;
+  private nightHeld = false;
+  /** Every effect on, or the lighter set for slower machines. */
+  private effects: 'full' | 'light' = 'full';
   private exitSpot: THREE.Vector3;
   /** When true the loop idles and tests drive the game step by step. */
   private manual = false;
@@ -175,6 +181,7 @@ export class Game {
     // the sky and the hands arrive a moment later; nothing waits on them
     const assets = import.meta.env.BASE_URL + 'assets/';
     this.handsReady = this.view.loadHands(assets + 'hands/');
+    try { if (localStorage.getItem('gloamtide.effects') === 'light') this.setEffects('light'); } catch { /* private window */ }
     void loadPhotoSky(scene, this.renderer, this.sky, { url: assets + 'sky/night.jpg', rotation: 2.2, backgroundIntensity: 0.26, lightIntensity: 0.5, fog: 0x211f2b });
   }
 
@@ -227,6 +234,11 @@ export class Game {
         this.syncKeys();
         this.pause();
       },
+      effects: this.effects,
+      toggleEffects: () => {
+        this.setEffects(this.effects === 'full' ? 'light' : 'full');
+        this.pause();
+      },
       forget: () => {
         this.knowledge = emptyKnowledge();
         saveKnowledge(this.knowledge);
@@ -248,7 +260,24 @@ export class Game {
   }
 
   /** Back to the body on the shore. The island forgets; you do not. */
+  /**
+   * Full effects, or the lighter set: no contact shading or glow, a smaller picture and
+   * shadow map, fewer particles. The game plays the same either way.
+   */
+  setEffects(level: 'full' | 'light') {
+    this.effects = level;
+    const full = level === 'full';
+    this.grounding.enabled = full;
+    this.bloom.enabled = full;
+    this.fx.density = full ? 1 : 0.5;
+    this.sky.setShadowSize(full ? 4096 : 2048);
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, full ? 1.5 : 1));
+    this.resize();
+    try { localStorage.setItem('gloamtide.effects', level); } catch { /* private window */ }
+  }
+
   private respawn() {
+    this.night = 0;
     this.enemies.clear();
     this.spells.clear();
     this.caster.reset();
@@ -422,9 +451,8 @@ export class Game {
         if (this.nearJournal) this.read(this.nearJournal);
         else if (this.atExit) this.recall(this.stands[0]);
       } else if (code === 'KeyO') {
-        // for comparing, and for slower machines
-        this.grounding.enabled = !this.grounding.enabled;
-        this.hud.whisper(this.grounding.enabled ? 'Contact shading on' : 'Contact shading off');
+        this.setEffects(this.effects === 'full' ? 'light' : 'full');
+        this.hud.whisper(this.effects === 'full' ? 'Effects: full' : 'Effects: light');
       } else if (code === 'BracketLeft' || code === 'BracketRight') {
         this.sensitivity *= code === 'BracketLeft' ? 0.87 : 1.15;
         this.hud.whisper(`Look speed ${Math.round((this.sensitivity / SENSITIVITY) * 100)}%`);
@@ -446,10 +474,24 @@ export class Game {
     this.enemies.update(dt);
     for (const st of this.stands) this.updateStand(st, dt);
 
-    // sea mist drifting in over the low ground
+    // Night comes on as you leave the wreck behind, and in any case with time.
+    if (!this.nightHeld) {
+      const north = THREE.MathUtils.clamp((16 - this.player.position.z) / 58, 0, 1);
+      this.night = Math.min(1, Math.max(this.night + dt / 420, north));
+    }
+
+    // sea mist drifting in over the low ground, and sand lifting off the dry
     this.mistClock += dt;
     if (this.mistClock > 0.16) {
       this.mistClock = 0;
+      {
+        const a = Math.random() * Math.PI * 2, d = 3 + Math.random() * 16;
+        const x = this.player.position.x + Math.cos(a) * d, z = this.player.position.z + Math.sin(a) * d;
+        const y = this.world.groundAt(x, z);
+        if (y !== null && y > this.world.waterLevel + 0.6 && Math.abs(y - this.player.position.y) < 4) {
+          this.fx.dust.emit(_centre.set(x, y + 0.08, z), { count: 3, color: FX_COLORS.sand, speed: [3.5, 7], life: [0.7, 1.5], size: [0.25, 0.7], dir: _wind, spread: 0.12, radius: 0.8, flat: 0.05, grow: 2.2, alpha: 0.16 });
+        }
+      }
       const a = Math.random() * Math.PI * 2, d = 10 + Math.random() * 34;
       const x = this.player.position.x + Math.cos(a) * d, z = this.player.position.z + Math.sin(a) * d;
       const y = this.world.groundAt(x, z);
@@ -529,6 +571,10 @@ export class Game {
     this.view.update(dt, this.player, this.caster.sentence.length > 0);
     this.fx.update(this.mode === 'playing' || this.mode === 'dead' ? dt : 0);
     this.level.update?.(this.time, dt);
+    this.sky.setNight(this.night);
+    seaUniforms.uNight.value = this.night;
+    this.renderer.toneMappingExposure = THREE.MathUtils.lerp(1.05, 1.2, this.night);
+    this.bloom.strength = THREE.MathUtils.lerp(0.55, 0.75, this.night);
     this.sky.update(cam);
     // keep the shadow map centred on the player, moving it in whole texels so shadows do not crawl
     const p = this.player.position, dir = this.sky.keyDir;
@@ -576,6 +622,11 @@ export class Game {
         this.view.update(STEP, this.player, this.caster.sentence.length > 0);
         this.fx.update(STEP);
       }
+    },
+    /** Hold the night at a given depth (0 dusk, 1 full dark), for pictures and tests. */
+    night: (n: number) => {
+      this.night = n;
+      this.nightHeld = true;
     },
     /** Draw one frame now. */
     render: () => this.present(0),
