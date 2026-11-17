@@ -95,19 +95,22 @@ const STORM = {
 
 interface Shot { pos: [number, number, number]; look: [number, number, number]; fov: number; exposure: number; grade?: Grade }
 const SHOTS: Record<string, Shot> = {
-  // the first thing you see: the headland on the right, the stack through the spray, the surf
-  waking: { pos: [10, 1.4, 12], look: [-160, 18, 130], fov: 55, exposure: 1.0 },
+  // the first thing you see: the headland on the right, the stacks through the spray, the surf
+  waking: { pos: [10, 1.4, 12], look: [-160, 22, 130], fov: 55, exposure: 1.0 },
+  // the beach fall, from the sand
+  beachfall: { pos: [-22, 1.6, -6], look: [-38, 38, -52], fov: 58, exposure: 1.0 },
   // the arch with the great fall behind it, the river running out toward you
-  arch: { pos: [24, 1.6, 2], look: [16, 21, -70], fov: 46, exposure: 1.0 },
-  archhigh: { pos: [16, 34, 20], look: [16, 18, -80], fov: 55, exposure: 1.0, grade: { rain: 0 } },
-  // in the canyon: mossy boulders in the river, the fall at its head
-  canyon: { pos: [19, 3.4, -66], look: [16, 22, -118], fov: 58, exposure: 1.05 },
-  // the giant's stair at the headland's foot, surf breaking on it
-  columns: { pos: [-66, 1.6, 30], look: [-104, 9, 42], fov: 55, exposure: 1.0 },
+  arch: { pos: [26, 1.6, 6], look: [16, 34, -70], fov: 52, exposure: 1.0 },
+  // in the canyon, under the great fall
+  canyon: { pos: [19, 3.4, -74], look: [16, 48, -120], fov: 62, exposure: 1.05 },
+  // the north wall running away toward the headland
+  cliffs: { pos: [62, 1.8, -24], look: [-30, 46, -56], fov: 55, exposure: 1.0 },
   // the whole beach, along the north wall toward the headland and the stacks
-  beach: { pos: [95, 2.0, 2], look: [-150, 14, 70], fov: 52, exposure: 1.0 },
+  beach: { pos: [95, 2.0, 2], look: [-150, 20, 70], fov: 52, exposure: 1.0 },
   // the wreck, close
-  wreck: { pos: [-48, 1.6, 30], look: [-72, 8, 14], fov: 55, exposure: 1.0 },
+  wreck: { pos: [-48, 1.6, 30], look: [-72, 10, 14], fov: 55, exposure: 1.0 },
+  // the sea, from the waterline
+  sea: { pos: [-30, 1.6, 32], look: [-140, 10, 150], fov: 55, exposure: 1.0 },
 };
 
 async function shot(name: string): Promise<string> {

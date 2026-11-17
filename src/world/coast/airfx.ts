@@ -4,7 +4,7 @@ import { air } from './atmosphere';
 
 let mistTex: THREE.Texture | null = null;
 /** A soft, ragged cloud on a canvas, for mist and spray. */
-function mistTexture(): THREE.Texture {
+export function mistTexture(): THREE.Texture {
   if (mistTex) return mistTex;
   const S = 256, c = document.createElement('canvas');
   c.width = c.height = S;

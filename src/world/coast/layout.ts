@@ -4,15 +4,16 @@
 // arch; the great fall drops at its head, and its river runs out across the beach to the sea.
 // Sea stacks stand off the headland. You wake in the middle of the beach.
 import { clamp, fbm, smoothstep, distToSegment } from '../../core/math';
+import { SEA_ROCKS } from './searocks-data';
 
 export const BAY = {
   wake: { x: 8, z: 8 },
   shoreZ: 24,
   /** Height of the land above the cliffs. */
-  plateau: 46,
+  plateau: 84,
   canyon: { x: 16, mouthZ: -53, headZ: -121, width: 27 },
-  arch: { x: 16, z: -62, thickness: 6, crown: 37 },
-  falls: { x: 16, z: -119, top: 47 },
+  arch: { x: 16, z: -62, thickness: 10, crown: 58 },
+  falls: { x: 16, z: -119, top: 86 },
   ship: { x: -70, z: 18, yaw: Math.PI / 2 - 0.35, heel: -0.24, pitch: 0.06, sink: 1.9 },
   /** Sea stacks: where, how tall, how broad at the foot. */
   stacks: [
@@ -90,49 +91,108 @@ function outlineDistance(x: number, z: number): number {
   return best * sign;
 }
 
-function buildSdf() {
-  const g = new Float32Array(SDF_W * SDF_H);
+function buildSdf(): [Float32Array, Float32Array] {
+  const land = new Float32Array(SDF_W * SDF_H), sea = new Float32Array(SDF_W * SDF_H);
   for (let j = 0; j < SDF_H; j++) for (let i = 0; i < SDF_W; i++) {
     const x = SDF.minX + i * SDF.cell, z = SDF.minZ + j * SDF.cell;
     let d = outlineDistance(x, z);
     // beyond the line's two ends there is no cliff
     if (x < -199 && z > 40) d = Math.min(d, -5);
-    // the sea stacks are rock too
-    for (const s of BAY.stacks) d = Math.max(d, s.r - Math.hypot(x - s.x, z - s.z));
-    g[j * SDF_W + i] = d;
+    land[j * SDF_W + i] = d;
+    // the rocks out in the sea: stacks, skerries, boulders
+    let r = -1e3;
+    for (const st of BAY.stacks) r = Math.max(r, st.r - Math.hypot(x - st.x, z - st.z));
+    for (const st of SEA_ROCKS) r = Math.max(r, st.r - Math.hypot(x - st.x, z - st.z));
+    sea[j * SDF_W + i] = r;
   }
-  return g;
+  return [land, sea];
 }
 
-/** How far inside the rock a point is (negative: how far out in the open). */
-export function rockDistance(x: number, z: number): number {
-  if (!sdfGrid) sdfGrid = buildSdf();
+let seaGrid: Float32Array | null = null;
+function sample(g: Float32Array, x: number, z: number): number {
   const fx = clamp((x - SDF.minX) / SDF.cell, 0, SDF_W - 1.001), fz = clamp((z - SDF.minZ) / SDF.cell, 0, SDF_H - 1.001);
   const i = Math.floor(fx), j = Math.floor(fz), u = fx - i, v = fz - j;
-  const g = sdfGrid;
   const a = g[j * SDF_W + i], b = g[j * SDF_W + i + 1], c = g[(j + 1) * SDF_W + i], d = g[(j + 1) * SDF_W + i + 1];
   return (a * (1 - u) + b * u) * (1 - v) + (c * (1 - u) + d * u) * v;
 }
+function grids() {
+  if (!sdfGrid) [sdfGrid, seaGrid] = buildSdf();
+}
+
+/** How far inside the cliffs' land a point is (negative: how far out in the open). */
+export function landDistance(x: number, z: number): number {
+  grids();
+  return sample(sdfGrid!, x, z);
+}
+
+/** How far inside any rock a point is, the cliffs or the rocks out at sea. */
+export function rockDistance(x: number, z: number): number {
+  grids();
+  return Math.max(sample(sdfGrid!, x, z), sample(seaGrid!, x, z));
+}
+
+/** How far inside the rocks out at sea a point is. */
+export function seaRockDistance(x: number, z: number): number {
+  grids();
+  return sample(seaGrid!, x, z);
+}
+
+/** Behind the cliff face the cliff mesh carries the land for this far; the ground lies low under it. */
+export const CAP = 40;
 
 /** The land on top of the cliffs. */
 export function plateauAt(x: number, z: number): number {
-  let h = BAY.plateau + fbm(x * 0.008, z * 0.008, 4) * 8 + fbm(x * 0.04, z * 0.04, 3) * 1.5;
-  h -= smoothstep(-120, -200, x) * smoothstep(-20, 40, z) * 10; // the headland falls toward its point
-  h -= smoothstep(100, 175, x) * 22; // and the cliffs fall away in the east
+  let h = BAY.plateau + fbm(x * 0.008, z * 0.008, 4) * 9 + fbm(x * 0.04, z * 0.04, 3) * 1.5;
+  h -= smoothstep(-120, -200, x) * smoothstep(-20, 40, z) * 22; // the headland falls toward its point
+  h -= smoothstep(100, 180, x) * 40; // and the cliffs fall away in the east
+  // the land keeps rising inland in long grassy slopes
+  h += smoothstep(4, 110, landDistance(x, z)) * 30;
+  // each fall comes over the edge in a notch, fed by a stream cut into the slope above
+  for (const f of FALLS) {
+    const dx = x - f.x, dz = z - f.z;
+    const along = dx * -f.nx + dz * -f.nz, across = Math.abs(dx * -f.nz + dz * f.nx);
+    if (along < -8 || along > 120) continue;
+    const w = f.width * 0.8 + along * 0.05;
+    h -= Math.exp(-Math.pow(across / w, 2)) * (6 + f.width * 0.4) * smoothstep(120, 0, along);
+  }
   return h;
 }
 
-/** Where the river runs, from the plunge pool to the sea. */
-export const RIVER: [number, number][] = [
-  [16, -114], [17, -104], [15, -92], [17, -80], [15, -68], [16, -56], [14, -44], [9, -32], [6, -20], [9, -8], [15, 4], [19, 14], [21, 24], [22, 36],
+/**
+ * The falls, each where it comes over the cliff edge: the lip, the way the face looks there,
+ * how wide the water is, and where it lands. `nx, nz` point out from the face.
+ */
+export interface Fall { name: string; x: number; z: number; nx: number; nz: number; width: number; pool: [number, number] }
+export const FALLS: Fall[] = [
+  { name: 'great', x: 16, z: -121, nx: 0, nz: 1, width: 15, pool: [16, -110] },
+  { name: 'beach', x: -38, z: -52, nx: 0.05, nz: 1, width: 11, pool: [-37.5, -42] },
+  { name: 'headland', x: -91, z: -12, nx: 1, nz: 0.05, width: 6, pool: [-82, -11.5] },
+  { name: 'east', x: 92, z: -48, nx: -0.1, nz: 1, width: 7, pool: [91, -39] },
 ];
+
+/** The streams, each from a plunge pool to the sea. The first is the canyon river. */
+export const RIVERS: [number, number][][] = [
+  [[16, -114], [17, -104], [15, -92], [17, -80], [15, -68], [16, -56], [14, -44], [9, -32], [6, -20], [9, -8], [15, 4], [19, 14], [21, 24], [22, 36]],
+  [[-37.5, -42], [-36, -32], [-39, -20], [-43, -8], [-41, 4], [-44, 16], [-46, 28], [-47, 40]],
+  [[-82, -11.5], [-80, -2], [-82, 8], [-86, 20], [-88, 34]],
+  [[91, -39], [89, -28], [92, -16], [96, -4], [94, 10], [97, 24], [99, 38]],
+];
+/** The canyon river, kept under its old name. */
+export const RIVER = RIVERS[0];
 
 function riverDistance(x: number, z: number): number {
   let best = 1e9;
-  for (let i = 0; i < RIVER.length - 1; i++) {
-    const [d] = distToSegment(x, z, RIVER[i][0], RIVER[i][1], RIVER[i + 1][0], RIVER[i + 1][1]);
+  for (const r of RIVERS) for (let i = 0; i < r.length - 1; i++) {
+    const [d] = distToSegment(x, z, r[i][0], r[i][1], r[i + 1][0], r[i + 1][1]);
     if (d < best) best = d;
   }
+  return best;
+}
+
+/** Distance to the nearest plunge pool, scaled by how big its fall is (1 = the pool's edge). */
+function poolDistance(x: number, z: number): number {
+  let best = 1e9;
+  for (const f of FALLS) best = Math.min(best, Math.hypot(x - f.pool[0], z - f.pool[1]) / (f.width * 0.7 + 2));
   return best;
 }
 
@@ -154,20 +214,23 @@ function openGround(x: number, z: number, d: number): number {
   // scree and turf banked against the foot of the cliffs
   const foot = smoothstep(-16, 0, d);
   h += foot * foot * (5 + fbm(x * 0.05, z * 0.05, 3) * 4) * (z > shore - 4 ? 0.3 : 1);
-  // the river's bed, and its pool under the falls
+  // the streams' beds, and the pools the falls have dug
   const rd = riverDistance(x, z);
-  h -= Math.exp(-Math.pow(rd / (2 + smoothstep(-50, 30, z) * 3.5), 2)) * 0.7;
-  h -= Math.exp(-Math.pow(Math.hypot(x - BAY.falls.x, z - (BAY.falls.z + 6)) / 6, 2)) * 1.6;
+  h -= Math.exp(-Math.pow(rd / (1.6 + smoothstep(-50, 30, z) * 3), 2)) * 0.7;
+  h -= Math.exp(-Math.pow(poolDistance(x, z), 2)) * 2.2;
   return h;
 }
 
 /** Ground height anywhere. Inside the rock it is the land on top of the cliffs. */
 export function groundHeight(x: number, z: number): number {
-  const d = rockDistance(x, z);
+  const d = landDistance(x, z);
   const open = openGround(x, z, Math.min(d, 0));
   if (d <= 1) return clamp(open, -60, 80);
+  // just behind the face the ground ducks out of sight under the cliff and its cap of turf,
+  // and comes up again as the land on top once it is clear of every buttress and bay
   const top = plateauAt(x, z);
-  return clamp(open + (top - open) * smoothstep(1, 4, d), -60, 80);
+  const low = open - 10 * smoothstep(1, 3, d);
+  return clamp(low + (top - low) * smoothstep(CAP, CAP + 4, d), -60, 100);
 }
 
 /** How wet the ground is here: by the sea, along the river. 0 dry, 1 soaked. */
@@ -175,7 +238,7 @@ export function wetness(x: number, z: number): number {
   const shore = shoreAt(x);
   const sea = smoothstep(shore - 14, shore - 1, z);
   const river = Math.exp(-Math.pow(riverDistance(x, z) / 3.5, 2));
-  const spray = Math.exp(-Math.pow(Math.hypot(x - BAY.falls.x, z - (BAY.falls.z + 6)) / 14, 2));
+  const spray = Math.exp(-Math.pow(poolDistance(x, z) / 2.6, 2));
   return clamp(Math.max(sea, river, spray), 0, 1);
 }
 
@@ -185,6 +248,8 @@ export function greenness(x: number, z: number): number {
   const scree = smoothstep(-14, -4, d) * (1 - smoothstep(-1, 1, d));
   const high = smoothstep(2, 6, d);
   const canyon = z < BAY.canyon.mouthZ - 3 ? 0.9 : 0;
+  // the spray off the falls keeps everything near them green
+  const lush = Math.exp(-Math.pow(poolDistance(x, z) / 3.5, 2)) * smoothstep(-1, -6, d);
   const patchy = smoothstep(0.25, 0.6, fbm(x * 0.05 + 9, z * 0.05, 3) * 0.5 + 0.5);
-  return clamp(Math.max(scree * patchy, high, canyon * (0.6 + 0.4 * patchy)) * (1 - wetness(x, z) * 0.6), 0, 1);
+  return clamp(Math.max(scree * patchy, high, canyon * (0.6 + 0.4 * patchy), lush) * (1 - wetness(x, z) * 0.5), 0, 1);
 }

@@ -3,13 +3,17 @@
 // rocks, what the sea threw up after her, the ruins of whoever lived here, and the birds.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { BAY, OUTLINE, RIVER, greenness, groundHeight, plateauAt, rockDistance, shoreAt } from './layout';
+import { BAY, FALLS, OUTLINE, RIVERS, greenness, groundHeight, plateauAt, rockDistance, shoreAt } from './layout';
 import { buildGround, loadTextureSet } from './terrain';
 import { buildOcean, oceanUniforms } from './ocean';
 import { place, tatter, weather, buildPeak, buildTower, buildVortex, summitOf, type ModelSource } from './dressing';
-import { mistBank, glow, beam, falls } from './airfx';
+import { mistBank, glow, beam } from './airfx';
 import { marram } from './grass';
-import { arch, boulders, cliffFace, columns, rockMaterial, scatterNear, seaStack } from './cliffs';
+import { arch, boulders, columns, rockMaterial, scatterNear, seaStack } from './cliffs';
+import { cliffFace, cliffMaterial } from './cliffface';
+import { fallUniforms, waterfall } from './falls';
+import { buildBirds } from './birds';
+import { buildSeaRocks } from './searocks';
 import { makeSeatedMage } from '../../art/mage';
 
 export interface Bay {
@@ -43,9 +47,11 @@ export async function buildBay(source: ModelSource, assets: string): Promise<Bay
   const basalt = rockMaterial(rockTex, { columnar: 0 });
   const columnar = rockMaterial(rockTex, { columnar: 1, moss: 0.8 });
   const solid = (geo: THREE.BufferGeometry, m: THREE.Material) => { const mesh = new THREE.Mesh(geo, m); mesh.castShadow = mesh.receiveShadow = true; root.add(mesh); return mesh; };
-  solid(cliffFace(), basalt);
+  solid(cliffFace(), cliffMaterial(rockTex));
   solid(mergeGeometries(BAY.stacks.map((s, i) => seaStack(s.x, s.z, s.h, s.r, i + 1)))!, columnar);
   solid(arch(), basalt);
+  // rock and wreckage out in the sea: more stacks, an arch, the reef she struck, her bow on it
+  root.add(buildSeaRocks({ basalt, columnar }));
   // columns: the giant's stair at the headland's corner, and organ pipes along its sea face
   const stair = (cx: number, cz: number, rad: number, tall: number, seed: number) => (x: number, z: number) => {
     const d = rockDistance(x, z);
@@ -57,7 +63,7 @@ export async function buildBay(source: ModelSource, assets: string): Promise<Bay
   solid(columns(-60, -48, 7, stair(-60, -48, 7, 9, 3), 3, 1.2), columnar);
   // boulders: along the river, in the canyon, on the scree, and black and wet at the headland's foot
   const river: { x: number; z: number; r: number; sink?: number }[] = [];
-  RIVER.forEach(([x, z], i) => {
+  RIVERS.flat().forEach(([x, z], i) => {
     for (let k = 0; k < 6; k++) {
       const a = hash(i, k) * 6.28, d = 1 + hash(k, i) * 6;
       river.push({ x: x + Math.cos(a) * d, z: z + Math.sin(a) * d, r: 0.4 + Math.pow(hash(i + k, 9), 2) * 1.8, sink: 0.2 });
@@ -201,24 +207,17 @@ export async function buildBay(source: ModelSource, assets: string): Promise<Bay
     marks.statue = head.position.clone();
   }
 
-  // ---- water: the great fall, the thin falls, the river ---------------------------------------
-  const F = BAY.falls;
-  root.add(falls(new THREE.Vector3(F.x, F.top, F.z - 1), new THREE.Vector3(F.x, groundHeight(F.x, F.z + 5), F.z + 3), 11, { bright: 0.85, mist: 0x9aa2aa }));
-  for (const [x, z, w] of [[-50, -50, 3.2], [92, -46, 2.6], [-90, -18, 3], [-20, -54, 2]] as [number, number, number][]) {
-    const f = faceNear(x, z);
-    const top = plateauAt(f.p.x - f.n.x * 3, f.p.z - f.n.z * 3);
-    const foot = f.p.clone().addScaledVector(f.n, 3);
-    root.add(falls(new THREE.Vector3(foot.x, top, foot.z), new THREE.Vector3(foot.x, groundHeight(foot.x, foot.z), foot.z), w, { bright: 0.65, spray: 1, mist: 0x8a9298 }));
-  }
-  {
-    const pts = RIVER.map(([x, z]) => new THREE.Vector3(x, 0, z));
+  // ---- water: the falls, and the streams they feed ------------------------------------------------
+  FALLS.forEach((f, k) => root.add(waterfall(f, { faceSetback: 0.6 * (3 + 0.55 * f.width) + 0.4, seed: k + 1 }).group));
+  RIVERS.forEach((river, ri) => {
+    const pts = river.map(([x, z]) => new THREE.Vector3(x, 0, z));
     const curve = new THREE.CatmullRomCurve3(pts);
-    const N = 300, P: number[] = [], UV: number[] = [], idx: number[] = [];
+    const N = Math.round(curve.getLength() * 1.5), P: number[] = [], UV: number[] = [], idx: number[] = [];
     for (let i = 0; i <= N; i++) {
       const t = i / N, p = curve.getPoint(t), d = curve.getTangent(t);
       const side = new THREE.Vector3(-d.z, 0, d.x).normalize();
-      const w = 2.2 + Math.max(0, p.z + 40) * 0.05;
-      for (const k of [-1, 1]) P.push(p.x + side.x * w * k, groundHeight(p.x, p.z) + 0.28, p.z + side.z * w * k), UV.push((k + 1) / 2, t * 160);
+      const w = ri === 0 ? 2.2 + Math.max(0, p.z + 40) * 0.05 : 1.1 + t * 1.6;
+      for (const k of [-1, 1]) P.push(p.x + side.x * w * k, groundHeight(p.x, p.z) + 0.28, p.z + side.z * w * k), UV.push((k + 1) / 2, t * N / 2);
       if (i < N) { const a = i * 2; idx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3); }
     }
     const geo = new THREE.BufferGeometry();
@@ -245,7 +244,7 @@ export async function buildBay(source: ModelSource, assets: string): Promise<Bay
     const r = new THREE.Mesh(geo, water);
     r.receiveShadow = true;
     root.add(r);
-  }
+  });
 
   // ---- grass and moss on the scree --------------------------------------------------------------
   {
@@ -276,43 +275,9 @@ export async function buildBay(source: ModelSource, assets: string): Promise<Bay
   bookLight.position.copy(book).add(new THREE.Vector3(0, 0.2, 0));
   root.add(bookLight, glow(book.clone().add(new THREE.Vector3(0, 0.05, 0)), 0.6, 0xffc070, 1.0), beam(book, 9, 0.05, 0xffc070, 0.35));
 
-  // ---- birds -----------------------------------------------------------------------------------
-  {
-    const gull = (() => {
-      const g = new THREE.BufferGeometry();
-      const v = [0, 0, 0, -0.9, 0.18, -0.15, -0.35, 0.05, 0.12, 0, 0, 0, 0.9, 0.18, -0.15, 0.35, 0.05, 0.12, 0, 0, 0.25, 0, 0.02, -0.35, 0.06, 0, 0];
-      g.setAttribute('position', new THREE.Float32BufferAttribute(v, 3));
-      g.computeVertexNormals();
-      return g;
-    })();
-    const parts: THREE.BufferGeometry[] = [];
-    const flock = (cx: number, cy: number, cz: number, n: number, spread: number, seed: number, scale: number) => {
-      for (let k = 0; k < n; k++) {
-        const g = gull.clone();
-        g.scale(scale, scale * (0.6 + hash(k, seed) * 0.8), scale);
-        g.rotateY(hash(k, seed + 1) * 6.28);
-        g.rotateZ((hash(k, seed + 2) - 0.5) * 0.6);
-        g.translate(cx + (hash(k, seed + 3) - 0.5) * spread, cy + (hash(k, seed + 4) - 0.5) * spread * 0.3, cz + (hash(k, seed + 5) - 0.5) * spread);
-        parts.push(g);
-      }
-    };
-    flock(-120, 40, 60, 14, 60, 1, 0.7);
-    flock(-40, 52, -40, 10, 40, 2, 0.7);
-    flock(-200, 60, 150, 8, 40, 3, 0.8);
-    flock(20, 30, -100, 6, 20, 4, 0.6);
-    const birds = new THREE.Mesh(mergeGeometries(parts)!, new THREE.MeshStandardMaterial({ color: 0xd8d8d4, roughness: 0.8, side: THREE.DoubleSide }));
-    root.add(birds);
-    // crows on the wreck's yards and rail
-    const crowParts: THREE.BufferGeometry[] = [];
-    for (let k = 0; k < 9; k++) {
-      const body = new THREE.SphereGeometry(0.16, 8, 6);
-      body.scale(0.8, 0.9, 1.4);
-      const at = new THREE.Vector3(-10 + k * 2.6, 6 + (k % 3) * 0.2, (k % 2) * 0.6 - 2.8).applyMatrix4(ship.matrixWorld);
-      body.translate(at.x, at.y, at.z);
-      crowParts.push(body);
-    }
-    root.add(new THREE.Mesh(mergeGeometries(crowParts)!, new THREE.MeshStandardMaterial({ color: 0x0a0a0c, roughness: 0.5 })));
-  }
+  // ---- birds ------------------------------------------------------------------------------------
+  const birds = buildBirds({ shipMatrix: ship.matrixWorld });
+  root.add(birds.group);
 
   // ---- far off: the peak, the tower, the wheel of cloud -----------------------------------------
   const P = BAY.peak;
@@ -340,6 +305,8 @@ export async function buildBay(source: ModelSource, assets: string): Promise<Bay
     root, marks,
     update(time) {
       oceanUniforms.uTime.value = time;
+      fallUniforms.uTime.value = time;
+      birds.update(time);
     },
   };
 }
