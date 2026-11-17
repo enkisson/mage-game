@@ -10,7 +10,7 @@ import { place, tatter, weather, buildPeak, buildTower, buildVortex, summitOf, t
 import { mistBank, glow, beam } from './airfx';
 import { marram } from './grass';
 import { arch, boulders, columns, rockMaterial, scatterNear, seaStack } from './cliffs';
-import { cliffFace, cliffMaterial } from './cliffface';
+import { cliffFace, cliffMaterial, colonnade, columnMaterial, fallRecess } from './cliffface';
 import { fallUniforms, waterfall } from './falls';
 import { buildBirds } from './birds';
 import { buildSeaRocks } from './searocks';
@@ -26,11 +26,15 @@ const hash = (a: number, b: number) => { const s = Math.sin(a * 127.1 + b * 311.
 
 /** The point on the cliff foot nearest (x, z), and which way the face looks there. */
 function faceNear(x: number, z: number): { p: THREE.Vector3; n: THREE.Vector3 } {
-  let best = 1e9, k = 0;
-  OUTLINE.forEach((q, i) => { const d = Math.hypot(q[0] - x, q[1] - z); if (d < best) { best = d; k = i; } });
-  const a = OUTLINE[Math.max(0, k - 3)], b = OUTLINE[Math.min(OUTLINE.length - 1, k + 3)];
-  const t = new THREE.Vector2(b[0] - a[0], b[1] - a[1]).normalize();
-  return { p: new THREE.Vector3(OUTLINE[k][0], 0, OUTLINE[k][1]), n: new THREE.Vector3(-t.y, 0, t.x) };
+  let best = 1e9, p = new THREE.Vector3(), n = new THREE.Vector3(0, 0, 1);
+  for (let i = 0; i < OUTLINE.length - 1; i++) {
+    const a = OUTLINE[i], b = OUTLINE[i + 1];
+    const dx = b[0] - a[0], dz = b[1] - a[1], l2 = dx * dx + dz * dz;
+    const t = Math.max(0, Math.min(1, ((x - a[0]) * dx + (z - a[1]) * dz) / l2));
+    const qx = a[0] + dx * t, qz = a[1] + dz * t, d = Math.hypot(x - qx, z - qz);
+    if (d < best) { best = d; p = new THREE.Vector3(qx, 0, qz); const l = Math.sqrt(l2); n = new THREE.Vector3(-dz / l, 0, dx / l); }
+  }
+  return { p, n };
 }
 
 export async function buildBay(source: ModelSource, assets: string): Promise<Bay> {
@@ -48,6 +52,7 @@ export async function buildBay(source: ModelSource, assets: string): Promise<Bay
   const columnar = rockMaterial(rockTex, { columnar: 1, moss: 0.8 });
   const solid = (geo: THREE.BufferGeometry, m: THREE.Material) => { const mesh = new THREE.Mesh(geo, m); mesh.castShadow = mesh.receiveShadow = true; root.add(mesh); return mesh; };
   solid(cliffFace(), cliffMaterial(rockTex));
+  solid(colonnade(), columnMaterial(rockTex));
   solid(mergeGeometries(BAY.stacks.map((s, i) => seaStack(s.x, s.z, s.h, s.r, i + 1)))!, columnar);
   solid(arch(), basalt);
   // rock and wreckage out in the sea: more stacks, an arch, the reef she struck, her bow on it
@@ -208,7 +213,7 @@ export async function buildBay(source: ModelSource, assets: string): Promise<Bay
   }
 
   // ---- water: the falls, and the streams they feed ------------------------------------------------
-  FALLS.forEach((f, k) => root.add(waterfall(f, { faceSetback: 0.6 * (3 + 0.55 * f.width) + 0.4, seed: k + 1 }).group));
+  FALLS.forEach((f, k) => root.add(waterfall(f, { faceSetback: fallRecess(f), seed: k + 1 }).group));
   RIVERS.forEach((river, ri) => {
     const pts = river.map(([x, z]) => new THREE.Vector3(x, 0, z));
     const curve = new THREE.CatmullRomCurve3(pts);

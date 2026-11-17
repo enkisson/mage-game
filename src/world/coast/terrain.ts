@@ -69,7 +69,7 @@ export function buildGround(dry: TextureSet, damp: TextureSet, rock: TextureSet,
         varying float vGreen;
         varying vec3 vGPos;
         varying vec3 vGNor;
-        float gWet, gRough;
+        float gWet, gRough, gPuddle;
         vec3 gN;
         float gh(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
         float gn(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
@@ -110,7 +110,11 @@ export function buildGround(dry: TextureSet, damp: TextureSet, rock: TextureSet,
           c = mix(c, rc, steep);
         }
         diffuseColor.rgb *= c;
-        gRough = mix(mix(0.92, 0.32 + gn(vGPos.xz * 1.3) * 0.25, gWet), 0.95, max(g, steep));
+        // wet sand is not one mirror: saturated matte sand, with glassy sheets of standing water
+        // and rills left by the backwash running down to the sea
+        float rill = smoothstep(0.55, 0.8, gf(vGPos.xz * vec2(0.6, 0.09) + vec2(0.0, gn(vGPos.xz * 0.2) * 2.0)));
+        gPuddle = max(smoothstep(0.52, 0.72, gf(vGPos.xz * vec2(0.09, 0.22) + 3.7)), rill * 0.8) * gWet;
+        gRough = mix(mix(0.92, mix(0.62 + gn(vGPos.xz * 1.3) * 0.2, 0.1, gPuddle), gWet), 0.95, max(g, steep));
         gRough = mix(gRough, 0.35, shingle * 0.5);
         vec3 nD = untiled(dryNor, guv, mixer).xyz * 2.0 - 1.0;
         vec3 nW = untiled(dampNor, guv * 1.1, mixer).xyz * 2.0 - 1.0;
@@ -121,7 +125,8 @@ export function buildGround(dry: TextureSet, damp: TextureSet, rock: TextureSet,
         vec3 tz = normalize(cross(wn, tx));
         gN = normalize(tx * nT.x + tz * nT.y + wn * nT.z);`)
       .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = gRough;')
-      .replace('#include <normal_fragment_maps>', 'normal = normalize((viewMatrix * vec4(gN, 0.0)).xyz);');
+      .replace('#include <normal_fragment_maps>', 'normal = normalize((viewMatrix * vec4(gN, 0.0)).xyz);')
+      .replace('#include <aomap_fragment>', '#include <aomap_fragment>\n reflectedLight.indirectSpecular *= mix(1.0, 0.55, gWet * (1.0 - gPuddle));');
   };
   const mesh = new THREE.Mesh(geo, m);
   mesh.receiveShadow = true;

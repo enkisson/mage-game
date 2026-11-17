@@ -114,6 +114,19 @@ export function buildOcean(ground: Ground, opts: { level?: number; deep?: number
           float oh(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
           float on(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
             return mix(mix(oh(i), oh(i + vec2(1, 0)), f.x), mix(oh(i + vec2(0, 1)), oh(i + vec2(1, 1)), f.x), f.y); }
+          // cellular lace: x = distance to the nearest cell wall (0 on the web, grows into the cell)
+          float ovor(vec2 p) {
+            vec2 i = floor(p), f = fract(p);
+            float d1 = 8.0, d2 = 8.0;
+            for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {
+              vec2 o = vec2(float(x), float(y));
+              vec2 c = vec2(oh(i + o), oh(i + o + 17.3));
+              c = 0.5 + 0.45 * sin(uTime * 0.6 + 6.2832 * c);
+              float d = length(o + c - f);
+              if (d < d1) { d2 = d1; d1 = d; } else if (d < d2) d2 = d;
+            }
+            return d2 - d1;
+          }
           float ofbm(vec2 p) { return on(p) * 0.5 + on(p * 2.1 + 3.1) * 0.27 + on(p * 4.3 + 7.7) * 0.15 + on(p * 8.7 + 1.3) * 0.08; }`)
         .replace('#include <map_fragment>', `
           vec2 p = vOPos.xz;
@@ -134,29 +147,44 @@ export function buildOcean(ground: Ground, opts: { level?: number; deep?: number
           slope += n1.xy * 0.5 + n2.xy * 0.4 + n3.xy * 0.25;
           // foam
           float crest = c0;
-          // breaking crests: where the swell is steep and the water shallow, the whole crest goes white
           float churn = ofbm(p * vec2(0.22, 0.4) + vec2(0.0, -uTime * 0.2)) + ofbm(p * 1.1 + uTime * 0.1) * 0.35 + 0.06;
           float lace = ofbm(p * vec2(0.7, 1.4) + churn * 1.5);
-          float breaking = smoothstep(0.55, 0.95, crest) * smoothstep(7.0, 2.5, oDepth) * smoothstep(0.0, 1.0, oDepth) * smoothstep(0.35, 0.6, lace + 0.1);
-          // the whitewater across the surf zone: sheets broken into holes and lace, dark water between
-          float surf = smoothstep(4.0, 0.6, oDepth) * smoothstep(0.55, 0.78, churn + (1.0 - smoothstep(0.0, 2.5, oDepth)) * 0.25) * smoothstep(0.3, 0.55, lace);
+          // breaker lines run parallel to the shore (depth contours): a sharp white front on each
+          // wave that decays seaward into a trailing band of lace, with dark troughs between
+          float wob = (ofbm(vec2(p.x * 0.035, p.y * 0.012)) - 0.5) * 1.6 + (on(p * 0.18) - 0.5) * 0.25;
+          float q = fract(oDepth / 5.5 + uTime * 0.075 + wob);
+          float band = (1.0 - smoothstep(0.0, 0.62, q)) * smoothstep(1.0, 0.965, q);
+          float zone = smoothstep(11.0, 5.0, oDepth) * smoothstep(0.35, 1.6, oDepth);
+          float web = 1.0 - smoothstep(0.0, 0.3, ovor(p * vec2(0.5, 0.9) + churn * 0.8));
+          float web2 = 1.0 - smoothstep(0.0, 0.22, ovor(p * vec2(1.2, 2.0) + 9.0 - vec2(0.0, uTime * 0.2)));
+          float body0 = band * zone;
+          float breaking = smoothstep(0.42, 0.62, body0 * (0.55 + 0.6 * lace) + web * body0 * 0.45 + web2 * body0 * 0.2 - 0.12);
+          // whitewater tumbling in over the last metres: only a thin web, lots of holes
+          float inner = smoothstep(2.6, 0.9, oDepth) * smoothstep(0.35, 0.9, oDepth) * band;
+          float surf = inner * smoothstep(0.5, 0.75, web * 0.7 + web2 * 0.4 + lace * 0.3 - 0.2) * 0.8;
           // foam round the cliffs and the stacks, thrown up where the water meets rock
           float atRock = smoothstep(-12.0, 0.0, rock) * smoothstep(0.55, 0.78, churn + smoothstep(-4.0, 0.0, rock) * 0.35) * smoothstep(0.3, 0.5, lace);
           // old foam left on the surface in long streaks, pulled by the wind
           float streaks = smoothstep(0.6, 0.8, ofbm(p * vec2(0.05, 0.22) + vec2(ofbm(p * 0.02) * 2.0, 0.0))) * 0.55 * (1.0 - smoothstep(30.0, 90.0, oDepth));
-          // the last of a wave sliding up the sand
-          float swash = smoothstep(0.4, 0.0, oDepth) * smoothstep(0.4, 0.65, lace) * (0.5 + 0.5 * on(p * 2.0 + uTime));
-          oFoam = clamp(max(max(breaking, surf), max(atRock, swash)) + streaks, 0.0, 1.0);
+          // the last of a wave sliding up the sand: a bright lacy lip at the leading edge only,
+          // dark glassy water behind it
+          float lip = smoothstep(0.0, 0.03, oDepth) * smoothstep(0.2, 0.05, oDepth);
+          float swash = lip * smoothstep(0.25, 0.55, web * 0.6 + web2 * 0.5 + lace * 0.35 - 0.1);
+          float trail = smoothstep(0.7, 0.25, oDepth) * smoothstep(0.2, 0.4, oDepth) * smoothstep(0.62, 0.8, web2 * 0.6 + lace * 0.5) * 0.45;
+          oFoam = clamp(max(max(breaking, surf), max(max(atRock, swash), trail)) + streaks, 0.0, 1.0);
           // body: dark slate out in the bay, turbid grey-green where the sand is stirred up
-          vec3 body = mix(diffuseColor.rgb, uShallow, smoothstep(16.0, 2.0, oDepth));
+          vec3 body = mix(diffuseColor.rgb, uShallow * 0.55, smoothstep(16.0, 2.0, oDepth));
           body = mix(body, uSand, smoothstep(1.2, 0.0, oDepth) * 0.6);
           // foam has body: brighter where it heaps up, grey and thin at its edges
           float heap = ofbm(p * 2.2 + uTime * 0.2);
-          vec3 foamC = mix(vec3(0.42, 0.46, 0.48), vec3(0.86, 0.88, 0.89), smoothstep(0.25, 0.8, heap) * smoothstep(0.1, 0.6, oFoam));
+          vec3 foamC = mix(vec3(0.27, 0.3, 0.32), vec3(0.8, 0.83, 0.85), smoothstep(0.25, 0.8, heap) * smoothstep(0.1, 0.6, oFoam));
           diffuseColor.rgb = mix(body, foamC, oFoam);
-          diffuseColor.a = mix(smoothstep(0.0, 0.6, oDepth) * 0.85 + 0.15, 1.0, smoothstep(0.0, 0.5, oFoam)) * smoothstep(-0.05, 0.03, oDepth);
+          diffuseColor.a = mix(smoothstep(0.0, 0.6, oDepth) * 0.5 + 0.5, 1.0, smoothstep(0.0, 0.5, oFoam)) * smoothstep(-0.05, 0.03, oDepth);
           slope += (vec2(on(p * 3.5), on(p * 3.5 + 5.0)) - 0.5) * oFoam * 1.4;
           oN = normalize(vec3(-slope.x, 1.0, -slope.y));`)
+        // the open water gives back only a dull slate of the sky; foam scatters light properly
+        .replace('#include <aomap_fragment>', `#include <aomap_fragment>
+          reflectedLight.indirectSpecular *= mix(0.28, 1.0, oFoam);`)
         .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = mix(0.07, 0.85, oFoam);')
         .replace('#include <normal_fragment_maps>', 'normal = normalize((viewMatrix * vec4(oN, 0.0)).xyz);')
         .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>

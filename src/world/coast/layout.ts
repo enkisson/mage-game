@@ -37,35 +37,47 @@ const RAW: [number, number][] = [
   [50, -50], [90, -48], [130, -38], [170, -20],
 ];
 
-function catmull(pts: [number, number][], step: number): [number, number][] {
-  const out: [number, number][] = [];
-  for (let i = 0; i < pts.length - 1; i++) {
-    const p0 = pts[Math.max(0, i - 1)], p1 = pts[i], p2 = pts[i + 1], p3 = pts[Math.min(pts.length - 1, i + 2)];
-    const len = Math.hypot(p2[0] - p1[0], p2[1] - p1[1]);
-    const n = Math.max(2, Math.ceil(len / step));
-    for (let k = 0; k < n; k++) {
-      const t = k / n, t2 = t * t, t3 = t2 * t;
-      const f = (j: 0 | 1) => 0.5 * (2 * p1[j] + (-p0[j] + p2[j]) * t + (2 * p0[j] - 5 * p1[j] + 4 * p2[j] - p3[j]) * t2 + (-p0[j] + 3 * p1[j] - 3 * p2[j] + p3[j]) * t3);
-      out.push([f(0), f(1)]);
-    }
-  }
-  out.push(pts[pts.length - 1]);
-  return out;
-}
+/**
+ * The falls, each where it comes over the cliff edge: the lip, the way the face looks there,
+ * how wide the water is, and where it lands. `nx, nz` point out from the face.
+ */
+export interface Fall { name: string; x: number; z: number; nx: number; nz: number; width: number; pool: [number, number] }
+export const FALLS: Fall[] = [
+  { name: 'great', x: 16, z: -121, nx: 0, nz: 1, width: 15, pool: [16, -110] },
+  { name: 'beach', x: -38, z: -52, nx: 0.05, nz: 1, width: 11, pool: [-37.5, -42] },
+  { name: 'headland', x: -91, z: -12, nx: 1, nz: 0.05, width: 6, pool: [-82, -11.5] },
+  { name: 'east', x: 92, z: -48, nx: -0.1, nz: 1, width: 7, pool: [91, -39] },
+];
 
-/** The cliff foot, every metre or so, wandering in and out in bays and buttresses. */
+const lhash = (a: number, b: number) => { const v = Math.sin(a * 127.1 + b * 311.7) * 43758.5453; return v - Math.floor(v); };
+
+/**
+ * The cliff foot: straight runs broken at angles, the way a basalt wall breaks along its joints
+ * into buttresses and bays. Each leg of the plan is cut into pieces 9-23 m long whose corners
+ * are pushed out or in, so the wall faces a little differently every few columns. The lips of
+ * the falls stay where they are, and the canyon walls stay tight.
+ */
 export const OUTLINE: [number, number][] = (() => {
-  const base = catmull(RAW, 1.0);
-  let s = 0;
-  return base.map((p, i) => {
-    const a = base[Math.max(0, i - 1)], b = base[Math.min(base.length - 1, i + 1)];
-    const tx = b[0] - a[0], tz = b[1] - a[1], l = Math.hypot(tx, tz) || 1;
-    if (i > 0) s += Math.hypot(p[0] - base[i - 1][0], p[1] - base[i - 1][1]);
-    // keep the canyon walls tight, let the long walls wander
-    const inCanyon = p[1] < -60 ? 0.3 : 1;
-    const j = (fbm(s * 0.03, 1.3, 3) * 5 + fbm(s * 0.12, 4.1, 2) * 1.2) * inCanyon;
-    return [p[0] + (-tz / l) * j, p[1] + (tx / l) * j] as [number, number];
-  });
+  const out: [number, number][] = [RAW[0]];
+  let k = 0;
+  for (let i = 0; i < RAW.length - 1; i++) {
+    const a = RAW[i], b = RAW[i + 1];
+    const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    const tx = (b[0] - a[0]) / len, tz = (b[1] - a[1]) / len;
+    const canyon = a[1] < -60 || b[1] < -60 ? 0.35 : 1;
+    let t = 0;
+    for (;;) {
+      t += 9 + lhash(k++, 1) * 14;
+      if (t > len - 7) break;
+      const x = a[0] + tx * t, z = a[1] + tz * t;
+      let calm = 1;
+      for (const f of FALLS) calm = Math.min(calm, smoothstep(7, 20, Math.hypot(x - f.x, z - f.z)));
+      const j = (lhash(k, 2) - 0.5) * 7 * canyon * calm;
+      out.push([x - tz * j, z + tx * j]);
+    }
+    out.push(b);
+  }
+  return out;
 })();
 
 // ---- signed distance to the cliff foot, positive inside the rock --------------------------------
@@ -158,18 +170,6 @@ export function plateauAt(x: number, z: number): number {
   return h;
 }
 
-/**
- * The falls, each where it comes over the cliff edge: the lip, the way the face looks there,
- * how wide the water is, and where it lands. `nx, nz` point out from the face.
- */
-export interface Fall { name: string; x: number; z: number; nx: number; nz: number; width: number; pool: [number, number] }
-export const FALLS: Fall[] = [
-  { name: 'great', x: 16, z: -121, nx: 0, nz: 1, width: 15, pool: [16, -110] },
-  { name: 'beach', x: -38, z: -52, nx: 0.05, nz: 1, width: 11, pool: [-37.5, -42] },
-  { name: 'headland', x: -91, z: -12, nx: 1, nz: 0.05, width: 6, pool: [-82, -11.5] },
-  { name: 'east', x: 92, z: -48, nx: -0.1, nz: 1, width: 7, pool: [91, -39] },
-];
-
 /** The streams, each from a plunge pool to the sea. The first is the canyon river. */
 export const RIVERS: [number, number][][] = [
   [[16, -114], [17, -104], [15, -92], [17, -80], [15, -68], [16, -56], [14, -44], [9, -32], [6, -20], [9, -8], [15, 4], [19, 14], [21, 24], [22, 36]],
@@ -212,8 +212,11 @@ function openGround(x: number, z: number, d: number): number {
   // the canyon floor climbs gently toward the falls
   h += Math.max(0, BAY.canyon.mouthZ - z) * 0.035;
   // scree and turf banked against the foot of the cliffs
+  // in some stretches a long grassed talus slope climbs the wall, elsewhere the columns
+  // stand straight out of the sand
   const foot = smoothstep(-16, 0, d);
-  h += foot * foot * (5 + fbm(x * 0.05, z * 0.05, 3) * 4) * (z > shore - 4 ? 0.3 : 1);
+  const talus = 1.5 + smoothstep(0.05, 0.4, fbm(x * 0.012 + 4.2, z * 0.012, 2)) * 9;
+  h += foot * foot * (talus + fbm(x * 0.05, z * 0.05, 3) * 2) * (z > shore - 4 ? 0.3 : 1);
   // the streams' beds, and the pools the falls have dug
   const rd = riverDistance(x, z);
   h -= Math.exp(-Math.pow(rd / (1.6 + smoothstep(-50, 30, z) * 3), 2)) * 0.7;
@@ -226,10 +229,10 @@ export function groundHeight(x: number, z: number): number {
   const d = landDistance(x, z);
   const open = openGround(x, z, Math.min(d, 0));
   if (d <= 1) return clamp(open, -60, 80);
-  // just behind the face the ground ducks out of sight under the cliff and its cap of turf,
+  // a few metres behind the face (deep enough for the bays and the caves) the ground ducks out of sight under the cliff and its cap of turf,
   // and comes up again as the land on top once it is clear of every buttress and bay
   const top = plateauAt(x, z);
-  const low = open - 10 * smoothstep(1, 3, d);
+  const low = open - 10 * smoothstep(8, 11, d);
   return clamp(low + (top - low) * smoothstep(CAP, CAP + 4, d), -60, 100);
 }
 

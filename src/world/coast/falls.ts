@@ -24,12 +24,14 @@ const VERT = /* glsl */ `
 varying vec2 vUv;
 varying vec3 vWp;
 varying vec3 vVn;
+varying vec3 vWn;
 void main() {
   vUv = uv;
   vec3 transformed = position;
   vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
   vWp = (modelMatrix * vec4(position, 1.0)).xyz;
   vVn = normalize(normalMatrix * normal);
+  vWn = normalize(mat3(modelMatrix) * normal);
   gl_Position = projectionMatrix * mvPosition;
 #include <fog_vertex>
 }`;
@@ -38,7 +40,14 @@ const NOISE = /* glsl */ `
 float wh(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
 float wn(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
   return mix(mix(wh(i), wh(i + vec2(1, 0)), f.x), mix(wh(i + vec2(0, 1)), wh(i + vec2(1, 1)), f.x), f.y); }
-float wf(vec2 p) { return wn(p) * 0.5 + wn(p * 2.07 + 3.1) * 0.27 + wn(p * 4.13 + 7.3) * 0.15 + wn(p * 8.4 + 1.9) * 0.08; }`;
+float wf(vec2 p) { return wn(p) * 0.5 + wn(p * 2.07 + 3.1) * 0.27 + wn(p * 4.13 + 7.3) * 0.15 + wn(p * 8.4 + 1.9) * 0.08; }
+// white water scatters light like snow: a soft wrap of the low sun on the side that faces it,
+// the grey sky from above, and a shadowed side that falls off into blue-grey
+vec3 waterLight(vec3 n, vec3 sunDir, vec3 sunCol) {
+  float sun = clamp(dot(n, sunDir) * 0.75 + 0.25, 0.0, 1.0);
+  float sky = 0.4 + 0.6 * clamp(n.y * 0.5 + 0.5, 0.0, 1.0);
+  return vec3(0.46, 0.5, 0.55) * sky + sunCol * sun * 0.7;
+}`;
 
 /**
  * A falling sheet. u runs across it, v from the lip (0) to the foot (1). `uKind`: 0 the body,
@@ -54,6 +63,7 @@ function sheetMaterial(seed: number, width: number, height: number, kind: number
 varying vec2 vUv;
 varying vec3 vWp;
 varying vec3 vVn;
+varying vec3 vWn;
 uniform float uTime, uLight, uSeed, uW, uH, uKind, uOpacity;
 ${NOISE}
 void main() {
@@ -86,6 +96,10 @@ void main() {
     c = mix(grey, white, smoothstep(0.35, 0.75, dens));
     c = mix(c, vec3(0.14, 0.17, 0.17) + vec3(0.25) * fine, tongue);
     a = mix(a, 0.85 * edge, tongue);
+  } else if (uKind > 2.5) {
+    // a rope of water peeled off the sheet: solid and white near the top, breaking into beads
+    a = smoothstep(0.2 + breakup * 0.25, 0.55, dens) * edge * (1.0 - breakup * 0.35);
+    c = mix(vec3(0.45, 0.5, 0.53), vec3(0.9, 0.92, 0.93), smoothstep(0.3, 0.7, dens));
   } else if (uKind < 1.5) {
     // a side curtain: strands tearing away
     a = smoothstep(0.45, 0.8, dens) * edge * (0.6 + 0.4 * breakup);
@@ -96,8 +110,25 @@ void main() {
     a = smoothstep(0.3, 0.8, mist) * edge * (0.2 + 0.8 * v * v);
     c = vec3(0.72, 0.76, 0.79);
   }
-  // a little shading: the body is lit from the sky above, and darker in its folds
-  c *= (0.82 + 0.18 * clamp(vVn.y * 0.5 + 0.5, 0.0, 1.0)) * uLight;
+  // light it: the normal of the lobed sheet, turned to face the eye, with the streaks
+  // bending it so every rope of water catches the light on one side
+  vec3 V = normalize(cameraPosition - vWp);
+  vec3 N = normalize(vWn);
+  if (dot(N, V) < 0.0) N = -N;
+  vec3 sideAx = normalize(cross(vec3(0.0, 1.0, 0.0), N) + vec3(1e-4, 0.0, 0.0));
+  float sd = wn(vec2(x * 1.3 + uSeed * 7.0 + 0.05, y * 0.035 - t * 0.9 * (1.0 + v))) - streak;
+  N = normalize(N + sideAx * sd * 6.0 * (abs(uKind - 2.0) > 0.5 ? 1.0 : 0.0));
+  #ifdef USE_FOG
+    vec3 lit = waterLight(N, fogSunDir, fogSunColor);
+  #else
+    vec3 lit = waterLight(N, normalize(vec3(-0.6, 0.25, 0.3)), vec3(0.9, 0.8, 0.7));
+  #endif
+  c *= lit * 1.15;
+  // seen edge-on the sheet is thicker: denser, and a little darker where the eye looks through the body
+  float graze = pow(1.0 - abs(dot(normalize(vWn), V)), 2.0);
+  a = clamp(a * (1.0 + graze * 0.8), 0.0, 1.0);
+  c *= 1.0 - graze * 0.15;
+  c *= uLight;
   // the last metres vanish into the spray
   a *= smoothstep(1.0, 0.9, v) * uOpacity;
   gl_FragColor = vec4(c, a);
@@ -117,6 +148,7 @@ function plungeMaterial(radius: number, impact: THREE.Vector2): THREE.ShaderMate
 varying vec2 vUv;
 varying vec3 vWp;
 varying vec3 vVn;
+varying vec3 vWn;
 uniform float uTime, uLight, uR;
 uniform vec2 uImpact;
 ${NOISE}
@@ -143,7 +175,7 @@ function rnd(seed: number) {
 }
 
 /** A ribbon following the fall's arc: `off` sideways and `depth` out from the centre line. */
-function arcRibbon(path: (v: number) => THREE.Vector3, side: THREE.Vector3, out: THREE.Vector3, width: (v: number) => number, rows: number, cols: number, off = 0, depth = 0): THREE.BufferGeometry {
+function arcRibbon(path: (v: number) => THREE.Vector3, side: THREE.Vector3, out: THREE.Vector3, width: (v: number) => number, rows: number, cols: number, off = 0, depth = 0, lobes: { c: number; w: number; a: number }[] = []): THREE.BufferGeometry {
   const pos: number[] = [], uv: number[] = [], idx: number[] = [];
   for (let j = 0; j <= rows; j++) {
     const v = j / rows;
@@ -152,7 +184,10 @@ function arcRibbon(path: (v: number) => THREE.Vector3, side: THREE.Vector3, out:
     for (let i = 0; i <= cols; i++) {
       const u = i / cols;
       // the sheet bows outward in the middle as the water spreads
-      const bow = Math.sin(u * Math.PI) * w * 0.06 * (0.3 + v);
+      // and is gathered into lobes, a ridge of water down each with a groove between,
+      // standing further out as they spread toward the foot
+      let bow = Math.sin(u * Math.PI) * w * 0.07 * (0.3 + v);
+      for (const l of lobes) bow += l.a * Math.exp(-Math.pow((u - l.c) / l.w, 2)) * (0.35 + v * 0.9);
       const p = c.clone().addScaledVector(side, (u - 0.5) * w + off).addScaledVector(out, depth + bow);
       pos.push(p.x, p.y, p.z);
       uv.push(u, v);
@@ -227,10 +262,25 @@ export function waterfall(f: Fall, opts: { faceSetback: number; seed: number; wi
     m.userData.noCollide = true;
     g.add(m);
   };
-  // the body: three sheets, back to front
-  add(arcRibbon(path, side, out, spread(0.92), rows, cols, 0, -0.7), sheetMaterial(opts.seed + 0.1, W, H, 0, 0.9), 9);
-  add(arcRibbon(path, side, out, spread(1.0), rows, cols, W * 0.04, 0), sheetMaterial(opts.seed + 0.2, W, H, 0, 0.95), 10);
-  add(arcRibbon(path, side, out, spread(0.85), rows, cols, -W * 0.05, 0.6), sheetMaterial(opts.seed + 0.3, W, H, 0, 0.8), 11);
+  // the body: three sheets, back to front, each gathered into its own lobes
+  const r = rnd(opts.seed * 13.7);
+  const lobes = (n: number) => Array.from({ length: n }, () => ({ c: 0.08 + r() * 0.84, w: 0.06 + r() * 0.1, a: (r() * 0.7 + 0.3) * (0.4 + W * 0.09) }));
+  const nl = Math.max(3, Math.round(W / 2.5));
+  add(arcRibbon(path, side, out, spread(0.92), rows, cols * 2, 0, -0.9, lobes(nl)), sheetMaterial(opts.seed + 0.1, W, H, 0, 0.9), 9);
+  add(arcRibbon(path, side, out, spread(1.0), rows, cols * 2, W * 0.04, 0, lobes(nl)), sheetMaterial(opts.seed + 0.2, W, H, 0, 0.95), 10);
+  add(arcRibbon(path, side, out, spread(0.85), rows, cols * 2, -W * 0.05, 0.7, lobes(nl)), sheetMaterial(opts.seed + 0.3, W, H, 0, 0.8), 11);
+  // ropes of water peeling away from the face of the sheet: each leaves the lip a little faster
+  // or slower than the rest, so they stand off it and drift apart as they fall
+  const ropes = Math.round(4 + W * 0.6);
+  for (let k = 0; k < ropes; k++) {
+    const kv = 0.85 + r() * 0.5, lat = (r() - 0.5) * W * 0.9, drift = (r() - 0.5) * 0.5;
+    const rp = (v: number) => {
+      const t = v * T;
+      return lip.clone().addScaledVector(out, v0 * kv * t + 0.3).addScaledVector(side, lat + drift * t * t).addScaledVector(wind, 0.15 * t * t).add(new THREE.Vector3(0, -4.9 * t * t, 0));
+    };
+    const rw = 0.35 + r() * 0.9;
+    add(arcRibbon(rp, side, out, (v) => rw * (1 + 1.5 * v), Math.round(rows * 0.8), 4, 0, 0.9 + r() * 0.8), sheetMaterial(opts.seed + 2 + k * 0.37, rw * 2, H, 3, 0.85), 12);
+  }
   // ragged curtains torn off each edge
   for (const k of [-1, 1]) add(arcRibbon(path, side, out, spread(0.28), rows, Math.max(8, cols / 3), k * W * 0.55, 0.2), sheetMaterial(opts.seed + 0.5 + k, W * 0.3, H, 1, 0.75), 12);
   // the veil of spray round it all
@@ -243,6 +293,23 @@ export function waterfall(f: Fall, opts: { faceSetback: number; seed: number; wi
   const rimY = groundHeight(f.pool[0] + poolR * 1.1, f.pool[1]) - 0.35;
   poolGeo.translate(impact.x, Math.min(rimY, floor + 1.6), impact.z);
   add(poolGeo, plungeMaterial(poolR, new THREE.Vector2(impact.x, impact.z)), 7);
+
+  // the boil: a mound of white water heaving up where the fall hits the pool
+  {
+    const br = W * 0.55 + 1.5;
+    const dome = new THREE.SphereGeometry(1, 40, 12, 0, Math.PI * 2, 0, Math.PI / 2);
+    const dp = dome.attributes.position;
+    for (let i = 0; i < dp.count; i++) {
+      const x = dp.getX(i), y = dp.getY(i), z = dp.getZ(i);
+      const bump = 1 + 0.25 * Math.sin(x * 7 + opts.seed) * Math.cos(z * 6 - opts.seed) + 0.15 * Math.sin(x * 15 + z * 11);
+      dp.setXYZ(i, x * br * (1 + 0.15 * y), y * (W * 0.12 + 1.2) * bump, z * br * 0.8 * (1 + 0.15 * y));
+    }
+    dome.computeVertexNormals();
+    const uv = dome.attributes.uv;
+    for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i), 1 - uv.getY(i));
+    dome.translate(impact.x, Math.min(groundHeight(f.pool[0] + (W * 0.95 + 3) * 1.1, f.pool[1]) - 0.35, floor + 1.6) - 0.3, impact.z);
+    add(dome, sheetMaterial(opts.seed + 9, br * 6, br * 3, 2, 0.9), 12);
+  }
 
   // spray: a towering cloud at the foot, drifting off on the wind, and mist clinging to the face
   g.add(sprayCloud(impact.clone().setY(floor + 1), W * 1.3 + 4, Math.min(H * 0.55, 40), wind, opts.seed + 3, 26 + Math.round(W * 2.5)));
