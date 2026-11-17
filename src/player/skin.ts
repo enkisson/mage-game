@@ -329,6 +329,9 @@ function patchSkin(m: THREE.MeshStandardMaterial, uniforms: SkinUniforms) {
           float reach = 1.0 / (1.0 + dot(toGlow, toGlow) * uGlowFall);
           float thin = mix(0.05, 1.0, vSkinA.x * vSkinA.x) * (1.0 - gSkinNail * 0.5) * (1.0 - gSkinCord);
           totalEmissiveRadiance += uGlowColor * vec3(1.0, 0.16, 0.05) * thin * reach;
+          // and lights the skin facing it, as a lamp held that close would
+          float facing = max(dot(normal, normalize(toGlow)), 0.0) * 0.85 + 0.15;
+          totalEmissiveRadiance += uGlowColor * diffuseColor.rgb * facing * reach * 2.6;
         }`);
   };
   m.customProgramCacheKey = () => 'skin';

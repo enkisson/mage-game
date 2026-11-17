@@ -32,7 +32,7 @@ Open the address it prints. It needs a keyboard and a trackpad or mouse.
 | Tab | Your own journal: every sentence you have found |
 | Esc | Pause |
 | [ and ] | Look speed down and up |
-| O | Effects: full, or a lighter set for slower machines |
+| O | Effects: full, or a lighter set for slower machines (picture sharpness adjusts itself to hold frame rate either way) |
 | M | Sound on or off |
 
 The pause menu can teach you all four words at once, for testing, and can wipe what you know.
@@ -87,6 +87,7 @@ The pause menu can teach you all four words at once, for testing, and can wipe w
 | `npm test` | Unit tests for the sentence grammar and the navigation grid |
 | `npm run playtest` | Build, then play the loop headlessly and check ten rules of the game |
 | `node tools/look.cjs shots` | Screenshot a set of situations from the built game |
+| `node tools/bench.cjs` | Time a frame with parts switched off, to see where it goes |
 | `node tools/hands.cjs out.jpg poses` | Contact sheet of every hand sign and gesture beat |
 | `node tools/hands.cjs out.jpg film fire push` | Film a sentence being spoken and cast, frame by frame |
 | `npm run assets` | Re-download the scanned textures and sky from Poly Haven |

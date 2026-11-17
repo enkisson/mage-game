@@ -219,7 +219,7 @@ class Cloud {
   }
 }
 
-interface Flash { light: THREE.PointLight; life: number; maxLife: number; peak: number }
+interface Flash { light: THREE.PointLight; life: number; maxLife: number; peak: number; carried: boolean }
 interface Transient { mesh: THREE.Mesh; life: number; maxLife: number; tick: (t: number, mesh: THREE.Mesh) => void }
 
 export const FX_COLORS = {
@@ -241,31 +241,30 @@ export class Effects {
   private flashes: Flash[] = [];
   private transients: Transient[] = [];
   private ringGeo = new THREE.RingGeometry(0.86, 1, 48);
-  /** Lights that things in flight can carry. A fixed few, so nothing has to be rebuilt mid-fight. */
-  private lamps: { light: THREE.PointLight; used: boolean }[] = [];
   private scorchTex: THREE.Texture | null = null;
   /** Told of every blast, and how big, so the camera can feel it. */
   onBlast: ((at: THREE.Vector3, power: number) => void) | null = null;
 
   constructor(private scene: THREE.Scene) {
     scene.add(this.glow.points, this.dust.points);
-    for (let i = 0; i < 6; i++) {
+    // Every light in the scene is paid for by every lit pixel, whether it is on or not, so
+    // there are only three of these, shared between brief flashes and lights carried by
+    // bolts and fires.
+    for (let i = 0; i < 3; i++) {
       const light = new THREE.PointLight(0xffffff, 0, 14, 1.8);
       scene.add(light);
-      this.flashes.push({ light, life: 0, maxLife: 1, peak: 0 });
-    }
-    for (let i = 0; i < 4; i++) {
-      const light = new THREE.PointLight(0xffffff, 0, 10, 1.8);
-      scene.add(light);
-      this.lamps.push({ light, used: false });
+      this.flashes.push({ light, life: 0, maxLife: 1, peak: 0, carried: false });
     }
   }
 
   /** Borrow a light to carry (on a bolt, over a fire). Null if all are out. */
   lamp(color: number, intensity: number, distance: number): THREE.PointLight | null {
-    const slot = this.lamps.find((l) => !l.used);
+    // a light that is idle, or failing that the flash nearest its end
+    let slot: Flash | null = null;
+    for (const f of this.flashes) if (!f.carried && (!slot || f.life < slot.life)) slot = f;
     if (!slot) return null;
-    slot.used = true;
+    slot.carried = true;
+    slot.life = 0;
     slot.light.color.set(color);
     slot.light.intensity = intensity;
     slot.light.distance = distance;
@@ -275,9 +274,9 @@ export class Effects {
 
   /** Give a borrowed light back. */
   unlamp(light: THREE.PointLight | null | undefined) {
-    const slot = this.lamps.find((l) => l.light === light);
-    if (!slot) return;
-    slot.used = false;
+    const slot = this.flashes.find((l) => l.light === light);
+    if (!slot || !slot.carried) return;
+    slot.carried = false;
     slot.light.intensity = 0;
     this.scene.add(slot.light);
   }
@@ -331,8 +330,10 @@ export class Effects {
 
   /** A brief coloured light. Reuses the pool's dimmest light. */
   flash(at: THREE.Vector3, color: number, intensity: number, distance = 14, life = 0.35) {
-    let slot = this.flashes[0];
-    for (const f of this.flashes) if (f.life < slot.life) slot = f;
+    let slot: Flash | null = null;
+    for (const f of this.flashes) if (!f.carried && (!slot || f.life < slot.life)) slot = f;
+    // a brighter flash already burning is not replaced by a dimmer one
+    if (!slot || (slot.life > 0 && slot.peak * (slot.life / slot.maxLife) ** 2 > intensity)) return;
     slot.light.position.copy(at);
     slot.light.color.set(color);
     slot.light.distance = distance;
@@ -412,6 +413,7 @@ export class Effects {
     this.glow.update(dt);
     this.dust.update(dt);
     for (const f of this.flashes) {
+      if (f.carried) continue;
       if (f.life > 0) {
         f.life -= dt;
         const t = Math.max(0, f.life / f.maxLife);

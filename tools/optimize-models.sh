@@ -26,10 +26,10 @@ while read -r name ratio error; do
   printf '%-28s %s\n' "$name" "$(du -h "$OUT/$name.glb" | cut -f1)"
 done <<'LIST'
 dutch_ship_medium 0.8 0.0005
-namaqualand_boulder_03 0.14 0.004
+namaqualand_boulder_03 0.042 0.01
 rock_09 0.25 0.004
 wooden_crate_01 1 0
-wooden_barrels_01 0.6 0.001
+wooden_barrels_01 0.25 0.004
 dry_branches_medium_01 0.35 0.002
 LIST
 rm -rf "$TMP"

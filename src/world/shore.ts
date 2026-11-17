@@ -4,6 +4,7 @@
 //
 // Axes: +x east, +z south (out to sea), -z inland. Sea level is y = 0.
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { clamp, smoothstep, fbm, rng, distToSegment } from '../core/math';
 import { mergeForCollision } from './world';
 import type { Level, JournalDef, StandDef } from './level';
@@ -125,7 +126,7 @@ function bedHeight(x: number, z: number): number {
   return h;
 }
 
-function terrain(cell: number): THREE.Mesh {
+function terrain(cell: number): THREE.Group {
   const nx = Math.round((BOUNDS.maxX - BOUNDS.minX) / cell);
   const nz = Math.round((BOUNDS.maxZ - BOUNDS.minZ) / cell);
   const pos = new Float32Array((nx + 1) * (nz + 1) * 3);
@@ -169,10 +170,72 @@ function terrain(cell: number): THREE.Mesh {
   }
   geo.setAttribute('blend', new THREE.BufferAttribute(blend, 3));
 
-  const mesh = new THREE.Mesh(geo, MATERIALS.ground);
-  mesh.receiveShadow = true;
-  mesh.castShadow = true;
-  return mesh;
+  // The ground is drawn as a patchwork of tiles that share one set of points, so that only
+  // the tiles in view are drawn, not the whole island every time.
+  const TILE = 48;
+  const group = new THREE.Group();
+  for (let tj = 0; tj < nz; tj += TILE) {
+    for (let ti = 0; ti < nx; ti += TILE) {
+      const tile: number[] = [];
+      const box = new THREE.Box3();
+      for (let j = tj; j < Math.min(nz, tj + TILE); j++) {
+        for (let i = ti; i < Math.min(nx, ti + TILE); i++) {
+          const a = j * (nx + 1) + i, b = a + 1, c = a + nx + 1, d = c + 1;
+          tile.push(a, c, b, b, c, d);
+          for (const k of [a, b, c, d]) box.expandByPoint(_tp.set(pos[k * 3], pos[k * 3 + 1], pos[k * 3 + 2]));
+        }
+      }
+      const g = new THREE.BufferGeometry();
+      for (const name of ['position', 'uv', 'normal', 'blend']) g.setAttribute(name, geo.attributes[name]);
+      g.setIndex(tile);
+      g.boundingBox = box;
+      g.boundingSphere = box.getBoundingSphere(new THREE.Sphere());
+      const mesh = new THREE.Mesh(g, MATERIALS.ground);
+      mesh.receiveShadow = true;
+      mesh.castShadow = true;
+      group.add(mesh);
+    }
+  }
+  return group;
+}
+const _tp = new THREE.Vector3();
+
+/**
+ * Weld still things that share a material into single meshes, a patch of ground at a time,
+ * so a beach of forty boulders is a handful of draws instead of forty. Every draw costs the
+ * same on the processor however small the thing drawn.
+ */
+function batchStatic(root: THREE.Object3D) {
+  root.updateMatrixWorld(true);
+  const sets = new Map<string, THREE.Mesh[]>();
+  root.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (!m.isMesh || (m as unknown as THREE.InstancedMesh).isInstancedMesh || (m as unknown as THREE.SkinnedMesh).isSkinnedMesh) return;
+    if (Array.isArray(m.material) || m.material === MATERIALS.ground || !m.visible || !m.material.visible) return;
+    if (m.matrixWorld.determinant() <= 0 || m.children.length) return;
+    m.getWorldPosition(_tp);
+    const key = [
+      m.material.uuid, m.castShadow, m.receiveShadow, m.renderOrder, !!m.userData.noCollide, !!m.userData.noShade,
+      Object.keys(m.geometry.attributes).sort().join(','), !!m.geometry.index, Math.floor(_tp.x / 44), Math.floor(_tp.z / 44),
+    ].join('|');
+    const set = sets.get(key);
+    if (set) set.push(m); else sets.set(key, [m]);
+  });
+  for (const set of sets.values()) {
+    if (set.length < 2) continue;
+    const parts = set.map((m) => m.geometry.clone().applyMatrix4(m.matrixWorld));
+    const merged = mergeGeometries(parts, false);
+    for (const g of parts) g.dispose();
+    if (!merged) continue;
+    const first = set[0];
+    const mesh = new THREE.Mesh(merged, first.material);
+    mesh.castShadow = first.castShadow;
+    mesh.receiveShadow = first.receiveShadow;
+    mesh.renderOrder = first.renderOrder;
+    Object.assign(mesh.userData, first.userData);
+    for (const m of set) m.removeFromParent();
+    root.add(mesh);
+  }
 }
 
 /** A weathered boulder: a sphere pushed around by noise. */
@@ -359,9 +422,6 @@ function tidePool(radius: number): THREE.Group {
   pool.rotation.x = -Math.PI / 2;
   pool.renderOrder = 1;
   g.add(pool);
-  const light = new THREE.PointLight(0x8dff3a, 6, 9, 1.8);
-  light.position.y = 0.9;
-  g.add(light);
   g.traverse((o) => { o.userData.noCollide = true; });
   return g;
 }
@@ -565,7 +625,13 @@ export function buildShore(models: Models): Level {
 
   // --- the wreck -------------------------------------------------------------------------
   let deckJournal: THREE.Vector3;
-  let lantern: THREE.PointLight | null = null;
+  // Things that glow: the stern lantern, the gloam pools. They share one real light, which
+  // sits at whichever is nearest you; a light costs every lit pixel on screen, so the far
+  // ones go without.
+  const glows: { at: THREE.Vector3; color: number; power: number; reach: number; flicker: boolean }[] = [];
+  const placeLight = new THREE.PointLight(0xffb060, 0, 30, 1.6);
+  let glowNow = -1, glowFade = 0;
+  root.add(placeLight);
   const landmarks: Record<string, THREE.Vector3> = {};
   const shipModel = models.clone('ship');
   if (shipModel) {
@@ -576,7 +642,20 @@ export function buildShore(models: Models): Level {
     ship.rotation.order = 'YXZ';
     ship.rotation.set(-0.25, Math.PI + 0.1, 0.03);
     ship.position.set(-5, bedHeight(-5, 6) - 1.1, 6);
+    const thinLines: THREE.Object3D[] = [];
+    root.userData.thinLines = thinLines;
     shipModel.traverse((o) => {
+      if (o.name.includes('rigging') && (o as THREE.Mesh).isMesh) {
+        // Ropes are narrower than a pixel from the beach, and break into dashes unless every
+        // edge is drawn several times over. When that is off, their edges are drawn as
+        // lines instead, which are always at least a pixel wide.
+        const lines = new THREE.LineSegments(new THREE.EdgesGeometry((o as THREE.Mesh).geometry, 20), new THREE.LineBasicMaterial({ color: 0x1b1611 }));
+        lines.userData.noCollide = true;
+        lines.userData.noShade = true;
+        lines.visible = false;
+        thinLines.push(lines);
+        o.add(lines);
+      }
       if (!o.name.includes('hull')) o.userData.noCollide = true;
       else if ((o as THREE.Mesh).isMesh) seatInGround((o as THREE.Mesh).material as THREE.MeshStandardMaterial, 0.8);
     });
@@ -605,9 +684,7 @@ export function buildShore(models: Models): Level {
 
     // the stern lantern is still burning
     const lampAt = onShip(-10.15, 5.72, 0);
-    lantern = new THREE.PointLight(0xffb060, 26, 30, 1.6);
-    lantern.position.copy(lampAt);
-    root.add(lantern);
+    glows.push({ at: lampAt.clone(), color: 0xffb060, power: 26, reach: 30, flicker: true });
     const lampGlow = glowSprite(0xffb060, 1.5, 2.2);
     lampGlow.position.copy(lampAt);
     root.add(lampGlow);
@@ -842,6 +919,7 @@ export function buildShore(models: Models): Level {
     const pool = tidePool(3.4);
     pool.position.copy(p).setY(p.y + 0.14);
     root.add(pool);
+    glows.push({ at: p.clone().setY(p.y + 1.0), color: 0x8dff3a, power: 6, reach: 9, flicker: false });
   }
   const stand: StandDef = {
     id: 'cove', name: 'The Cove',
@@ -877,6 +955,8 @@ export function buildShore(models: Models): Level {
   walls.traverse((o) => { (o as THREE.Mesh).castShadow = false; });
 
   const collision = mergeForCollision([solid, walls]);
+  // collision is taken from the separate pieces; for drawing, weld what can be welded
+  batchStatic(solid);
 
   // --- the sea ---------------------------------------------------------------------------
   // fine near the beach, where the depth changes and the foam runs; coarse out to the horizon
@@ -936,12 +1016,33 @@ export function buildShore(models: Models): Level {
     bounds: BOUNDS,
     waterLevel: 0,
     landmarks,
-    update(time) {
+    update(time, dt, eye) {
+      // hand the one light to the nearest glow, dimming it out and in so it never jumps
+      if (eye && glows.length) {
+        let best = 0, bestD = Infinity;
+        glows.forEach((gl, i) => {
+          const d = gl.at.distanceTo(eye) / gl.reach;
+          if (d < bestD) { bestD = d; best = i; }
+        });
+        if (best !== glowNow) {
+          glowFade = Math.max(0, glowFade - dt * 3);
+          if (glowFade <= 0 || glowNow < 0) {
+            glowNow = best;
+            placeLight.position.copy(glows[best].at);
+            placeLight.color.set(glows[best].color);
+            placeLight.distance = glows[best].reach;
+          }
+        } else {
+          glowFade = Math.min(1, glowFade + dt * 3);
+        }
+        const gl = glows[glowNow];
+        const flick = gl.flicker ? 0.82 + Math.sin(time * 11) * 0.06 + Math.sin(time * 23.7) * 0.05 + Math.sin(time * 3.1) * 0.07 : 1;
+        placeLight.intensity = gl.power * flick * glowFade;
+      }
       // the swell drifts shoreward, and the grass leans with the wind
       waterRipples.offset.set(time * 0.012, -time * 0.02);
       grassTime.value = time;
       seaUniforms.uTime.value = time;
-      if (lantern) lantern.intensity = 26 * (0.82 + Math.sin(time * 11) * 0.06 + Math.sin(time * 23.7) * 0.05 + Math.sin(time * 3.1) * 0.07);
     },
   };
 }

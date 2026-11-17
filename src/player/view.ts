@@ -60,11 +60,11 @@ const WRIST_LAG = [1, 0.86, 1.12];
 const FINGER_LAG = [0.9, 0.9, 1, 1.1, 1, 1.12, 1, 1.08, 1.2, 1.08, 1.18, 1.32, 1.18, 1.3, 1.45, 1.3];
 const FINGER_WEIGHT = [0.8, 0.9, 1, 1.15];
 /** How brightly each held word lights the hand and the ground. */
-const GLOW: Partial<Record<SigilId, { hand: number; skin: number; world: number }>> = {
-  fire: { hand: 0.016, skin: 0.9, world: 1.8 },
-  wind: { hand: 0.012, skin: 0.25, world: 0.4 },
-  push: { hand: 0.014, skin: 0.3, world: 0.5 },
-  stone: { hand: 0.006, skin: 0.1, world: 0.2 },
+const GLOW: Partial<Record<SigilId, { skin: number; world: number }>> = {
+  fire: { skin: 0.9, world: 1.8 },
+  wind: { skin: 0.25, world: 0.4 },
+  push: { skin: 0.3, world: 0.5 },
+  stone: { skin: 0.1, world: 0.2 },
 };
 
 /** A slow, never-repeating wander between -1 and 1. */
@@ -91,7 +91,8 @@ const MARK_LIT = 3.2;
 class Arm {
   readonly holder = new THREE.Group();
   readonly forearm: Forearm;
-  readonly light = new THREE.PointLight(0xffffff, 0, 0.9 * VIEW_SCALE, 2);
+  /** Where the held word's light is, in the hands' space. */
+  private glowAt = new THREE.Vector3();
   readonly pos = new Spring(3);
   readonly aimed = new Spring(6);
   readonly fingers = new Spring(16);
@@ -128,7 +129,7 @@ class Arm {
     this.sign = this.mirror ? -1 : 1;
     this.armSkin = skinMaterial(SKIN_TONE, this.mirror ? -1 : 1);
     this.forearm = new Forearm(side, this.armSkin);
-    parent.add(this.holder, this.forearm.group, this.light);
+    parent.add(this.holder, this.forearm.group);
     this.holder.visible = false;
     this.forearm.group.visible = false;
     poseToArray(IDLE, this.mirror, this.target);
@@ -346,11 +347,11 @@ class Arm {
     const glow = this.last ? GLOW[this.last] : undefined;
     const flicker = this.last === 'fire' ? 0.82 + wander(clock * 17, seed) * 0.12 + wander(clock * 31, seed + 2) * 0.06 : 0.92 + Math.sin(clock * 4 + seed) * 0.08;
     const lit = this.amount * flicker + this.flash * 1.6;
-    if (this.last) this.light.color.set(SIGILS[this.last].color);
-    this.light.intensity = (glow?.hand ?? 0.03) * lit * VIEW_SCALE * VIEW_SCALE;
-    this.light.position.copy(s.palmAt).addScaledVector(_z, 0.03);
+    // (the hand is lit by its word inside the skin shader; a real light here would be paid
+    // for by every pixel on screen)
+    this.glowAt.copy(s.palmAt).addScaledVector(_z, 0.03);
     if (this.handSkin) {
-      this.handSkin.skin.uGlowPos.value.copy(this.light.position).multiplyScalar(VIEW_SCALE);
+      this.handSkin.skin.uGlowPos.value.copy(this.glowAt).multiplyScalar(VIEW_SCALE);
       _col.set(this.last ? SIGILS[this.last].color : 0);
       this.handSkin.skin.uGlowColor.value.copy(_col).multiplyScalar((glow?.skin ?? 0.2) * lit);
     }

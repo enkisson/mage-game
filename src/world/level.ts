@@ -60,5 +60,6 @@ export interface Level {
   /** Named places worth pointing at: for hints, and for the automated playtest. */
   landmarks: Record<string, THREE.Vector3>;
   /** Called every frame for things like water and flames. */
-  update?: (time: number, dt: number) => void;
+  /** `eye` is where the player is looking from, for anything that depends on how near they are. */
+  update?: (time: number, dt: number, eye?: THREE.Vector3) => void;
 }

@@ -24,6 +24,9 @@ import { Sound } from '../audio/sound';
 import { Hud } from '../ui/hud';
 import { createSky, loadPhotoSky, type NightSky } from './sky';
 import { GroundingPass } from './grounding';
+import { ScenePass } from './scenepass';
+import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
+import { FXAAShader } from 'three/examples/jsm/shaders/FXAAShader.js';
 import type { Models } from '../art/models';
 import { emptyKnowledge, learnSigil, loadKnowledge, saveKnowledge, type Knowledge } from './save';
 import { GESTURES, HOLD, IDLE, type GestureName } from '../player/poses';
@@ -70,6 +73,21 @@ export class Game {
 
   private composer: EffectComposer;
   private bloom: UnrealBloomPass;
+  private scenePass: ScenePass;
+  private fxaa: ShaderPass;
+  /**
+   * How much is asked of the graphics card: a rung on a ladder that runs from a soft picture
+   * with cheap edge-smoothing up to a sharp one with every edge drawn several times over.
+   * The game climbs it while frames are quick and steps down when they are not.
+   */
+  private rung = 3;
+  private frameMs = 16;
+  private slowFor = 0;
+  private fastFor = 0;
+  /** A rung that proved too much, and until when to stay below it. */
+  private tooMuch = { rung: Infinity, until: 0 };
+  private frameCount = 0;
+  private settling = 3;
   private grounding: GroundingPass;
   private sky: NightSky;
   private journals: { def: JournalDef; prop: JournalProp }[] = [];
@@ -98,9 +116,11 @@ export class Game {
 
   constructor(private container: HTMLElement, models: Models) {
     this.renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1));
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    // the shadow map is redrawn every other frame (see present)
+    this.renderer.shadowMap.autoUpdate = false;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
     container.appendChild(this.renderer.domElement);
@@ -153,14 +173,18 @@ export class Game {
     this.resetStands();
 
     // post
-    const target = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 4 });
+    const target = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, depthBuffer: false });
     this.composer = new EffectComposer(this.renderer, target);
-    this.composer.addPass(new RenderPass(scene, this.view.camera));
+    this.scenePass = new ScenePass(scene, this.view.camera, 0);
+    this.composer.addPass(this.scenePass);
     this.grounding = new GroundingPass(scene, this.view.camera);
     this.composer.addPass(this.grounding);
     this.bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.55, 0.6, 1.0);
     this.composer.addPass(this.bloom);
     this.composer.addPass(new OutputPass());
+    // edges are smoothed in one cheap pass over the finished picture
+    this.fxaa = new ShaderPass(FXAAShader);
+    this.composer.addPass(this.fxaa);
 
     // sound can only begin once the player has clicked or pressed something
     const wake = () => this.sound.wake();
@@ -190,7 +214,10 @@ export class Game {
     // the sky and the hands arrive a moment later; nothing waits on them
     const assets = import.meta.env.BASE_URL + 'assets/';
     this.handsReady = this.view.loadHands(assets + 'hands/');
-    try { if (localStorage.getItem('gloamtide.effects') === 'light') this.setEffects('light'); } catch { /* private window */ }
+    let light = false;
+    try { light = localStorage.getItem('gloamtide.effects') === 'light'; } catch { /* private window */ }
+    if (light) this.setEffects('light');
+    else this.setRung(this.rung);
     void loadPhotoSky(scene, this.renderer, this.sky, { url: assets + 'sky/night.jpg', rotation: 2.2, backgroundIntensity: 0.26, lightIntensity: 0.5, fog: 0x211f2b });
   }
 
@@ -275,16 +302,73 @@ export class Game {
    * Full effects, or the lighter set: no contact shading or glow, a smaller picture and
    * shadow map, fewer particles. The game plays the same either way.
    */
-  setEffects(level: 'full' | 'light') {
+  setEffects(level: 'full' | 'light', remember = true) {
     this.effects = level;
     const full = level === 'full';
     this.grounding.enabled = full;
     this.bloom.enabled = full;
     this.fx.density = full ? 1 : 0.5;
     this.sky.setShadowSize(full ? 4096 : 2048);
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, full ? 1.5 : 1));
+    this.setRung(this.rung);
+    if (remember) try { localStorage.setItem('gloamtide.effects', level); } catch { /* private window */ }
+  }
+
+  /** The rungs this screen and these effects allow, softest first. */
+  private ladder(): { ratio: number; fine: boolean }[] {
+    const dpr = window.devicePixelRatio || 1;
+    const rungs = [{ ratio: 0.55, fine: false }, { ratio: 0.7, fine: false }, { ratio: 0.85, fine: false }, { ratio: 1, fine: false }];
+    if (this.effects === 'full') {
+      rungs.push({ ratio: 1, fine: true });
+      if (dpr >= 1.25) rungs.push({ ratio: 1.25, fine: true });
+      if (dpr >= 1.5) rungs.push({ ratio: 1.5, fine: true });
+    }
+    return rungs;
+  }
+
+  private setRung(rung: number) {
+    const ladder = this.ladder();
+    this.rung = THREE.MathUtils.clamp(rung, 0, ladder.length - 1);
+    const { ratio, fine } = ladder[this.rung];
+    this.renderer.setPixelRatio(ratio);
+    // fine edges: every pixel's edges drawn four times over. Otherwise one cheap pass over
+    // the finished picture, with the ship's ropes drawn as lines so they do not break up.
+    this.scenePass.setSamples(fine ? 4 : 0);
+    this.fxaa.enabled = !fine;
+    for (const thin of (this.level.root.userData.thinLines as THREE.Object3D[] | undefined) ?? []) thin.visible = !fine;
     this.resize();
-    try { localStorage.setItem('gloamtide.effects', level); } catch { /* private window */ }
+  }
+
+  /**
+   * Keep the game smooth: step down the ladder when frames run long, and climb it when there
+   * is time to spare. If the bottom rung is still too slow, the lighter set of effects is
+   * switched on as well.
+   */
+  private pace(dt: number) {
+    if (dt > 0.25 || this.mode !== 'playing') { this.settling = 2.5; return; } // a pause, a hidden tab: not a measure of anything
+    // nor are the first moments, while the graphics card is still being told what to draw
+    if (this.settling > 0) { this.settling -= dt; return; }
+    this.frameMs += (dt * 1000 - this.frameMs) * 0.08;
+    const now = performance.now();
+    this.slowFor = this.frameMs > 21 ? this.slowFor + dt : 0;
+    this.fastFor = this.frameMs < 17.6 ? this.fastFor + dt : 0;
+    if (this.slowFor > 0.7) {
+      this.slowFor = 0;
+      this.tooMuch = { rung: this.rung, until: now + 90000 };
+      if (this.rung > 0) {
+        this.setRung(this.rung - (this.frameMs > 34 ? 2 : 1));
+      } else if (this.effects === 'full') {
+        this.setEffects('light', false);
+        this.hud.whisper('Effects set to light to keep things smooth (O to change)');
+      }
+      this.frameMs = 17;
+      this.settling = 0.6;
+    } else if (this.fastFor > 4) {
+      this.fastFor = 0;
+      if (this.rung + 1 < this.ladder().length && (now > this.tooMuch.until || this.rung + 1 < this.tooMuch.rung)) {
+        this.setRung(this.rung + 1);
+        this.settling = 0.6;
+      }
+    }
   }
 
   private respawn() {
@@ -600,7 +684,7 @@ export class Game {
     this.view.reach = ahead ? ahead.point.distanceTo(this.player.eye) : 99;
     this.view.update(dt, this.player, this.caster.sentence.length > 0);
     this.fx.update(this.mode === 'playing' || this.mode === 'dead' ? dt : 0);
-    this.level.update?.(this.time, dt);
+    this.level.update?.(this.time, dt, cam.position);
     {
       const p = this.player.position;
       const shore = THREE.MathUtils.clamp(1 - (30 - p.z) / 85, 0.1, 1);
@@ -618,15 +702,20 @@ export class Game {
     this.renderer.toneMappingExposure = THREE.MathUtils.lerp(1.05, 1.2, this.night);
     this.bloom.strength = THREE.MathUtils.lerp(0.55, 0.75, this.night);
     this.sky.update(cam);
-    // keep the shadow map centred on the player, moving it in whole texels so shadows do not crawl
-    const p = this.player.position, dir = this.sky.keyDir;
-    const right = _right.crossVectors(_up, dir).normalize();
-    const upL = _upL.crossVectors(dir, right);
-    const texel = 92 / 4096;
-    const sx = Math.round(p.dot(right) / texel) * texel, sy = Math.round(p.dot(upL) / texel) * texel;
-    const centre = _centre.set(0, 0, 0).addScaledVector(right, sx).addScaledVector(upL, sy).addScaledVector(dir, p.dot(dir));
-    this.sky.key.target.position.copy(centre);
-    this.sky.key.position.copy(centre).addScaledVector(dir, 90);
+    // Shadows are redrawn every other frame; the light only moves when they are, so the
+    // shadows on screen always match the map they were drawn from.
+    if (this.manual || this.frameCount++ % 2 === 0) {
+      this.renderer.shadowMap.needsUpdate = true;
+      // keep the shadow map centred on the player, moving it in whole texels so shadows do not crawl
+      const p = this.player.position, dir = this.sky.keyDir;
+      const right = _right.crossVectors(_up, dir).normalize();
+      const upL = _upL.crossVectors(dir, right);
+      const texel = 92 / 4096;
+      const sx = Math.round(p.dot(right) / texel) * texel, sy = Math.round(p.dot(upL) / texel) * texel;
+      const centre = _centre.set(0, 0, 0).addScaledVector(right, sx).addScaledVector(upL, sy).addScaledVector(dir, p.dot(dir));
+      this.sky.key.target.position.copy(centre);
+      this.sky.key.position.copy(centre).addScaledVector(dir, 90);
+    }
     this.hud.update(dt, this.player.health, this.player.focus);
     this.composer.render();
   }
@@ -640,13 +729,18 @@ export class Game {
     this.view.camera.updateProjectionMatrix();
     this.fx.resize(h * this.renderer.getPixelRatio(), this.view.baseFov);
     this.view.setViewport(h * this.renderer.getPixelRatio());
+    const pr = this.renderer.getPixelRatio();
+    this.fxaa.material.uniforms.resolution.value.set(1 / (w * pr), 1 / (h * pr));
   }
 
   run() {
     const tick = (now: number) => {
       const dt = this.last ? (now - this.last) / 1000 : STEP;
       this.last = now;
-      if (!this.manual) this.frame(dt);
+      if (!this.manual) {
+        this.pace(dt);
+        this.frame(dt);
+      }
       requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);

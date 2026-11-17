@@ -14,8 +14,8 @@ export class GroundingPass extends GTAOPass {
   constructor(scene: THREE.Scene, camera: THREE.Camera) {
     super(scene, camera, 2, 2);
     // reach of the shading in metres, and how it is smoothed
-    this.updateGtaoMaterial({ radius: 0.7, distanceExponent: 1.4, thickness: 1.4, scale: 1.25, samples: 12, distanceFallOff: 1 });
-    this.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 5, rings: 2, samples: 12 });
+    this.updateGtaoMaterial({ radius: 0.7, distanceExponent: 1.4, thickness: 1.4, scale: 1.25, samples: 8, distanceFallOff: 1 });
+    this.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 5, rings: 2, samples: 8 });
     this.blendIntensity = 0.95;
   }
 
