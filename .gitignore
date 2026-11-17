@@ -3,3 +3,4 @@ node_modules/
 dist/
 *.local
 assets-src/
+tools/__pycache__/

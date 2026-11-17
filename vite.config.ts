@@ -6,6 +6,10 @@ export default defineConfig({
   build: {
     target: 'es2022',
     chunkSizeWarningLimit: 1500,
+    rollupOptions: {
+      // the game, and the look-dev page that renders concept shots of the world
+      input: { main: 'index.html', lookdev: 'lookdev.html' },
+    },
   },
   test: {
     include: ['tests/**/*.test.ts'],
