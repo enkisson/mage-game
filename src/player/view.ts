@@ -12,7 +12,7 @@ import { SIGILS, type SigilId } from '../magic/sigils';
 import type { SpellDef } from '../magic/grammar';
 import { PLAYER, type Player } from './player';
 import { ARM_SIZE, Forearm, HandRig, Spring, loadHands, poseToArray, skinOf, type ArmBeat, type ArmPose } from './hands';
-import { BRACE, GESTURES, GESTURE_TAIL, HOLD, IDLE, LET_GO, STRIKE, forming, gestureFor } from './poses';
+import { BRACE, GESTURES, GESTURE_TAIL, HOLD, IDLE, LET_GO, PLANTED, SPRAWLED, STRIKE, forming, gestureFor } from './poses';
 import { HandMagic, type HandState } from './handfx';
 import { skinMaterial, type SkinMaterial } from './skin';
 
@@ -511,6 +511,25 @@ export class View {
     if (made && spell) this.recoil.kick([0.25 + spell.cost * 0.012]);
   }
 
+  /** Seconds since waking began, or past the end if awake. */
+  private wakeT = 99;
+  /** How far the eyes are open, 0 to 1. */
+  eyesOpen = 1;
+
+  /**
+   * Come to on the sand: the eyes open, close, open; a hand finds the ground; you push
+   * yourself up. It takes a few seconds and does not stop you moving.
+   */
+  wake() {
+    this.wakeT = 0;
+    this.eyesOpen = 0;
+    for (const arm of [this.left, this.right]) {
+      arm.aim(SPRAWLED, 0.05);
+      arm.snap();
+      arm.begin([{ t: arm.mirror ? 1.0 : 0.75, ease: 0.34, pose: PLANTED }, { t: 2.35, ease: 0.42, pose: IDLE }]);
+    }
+  }
+
   /** The ground or the air jumps: a blast nearby, a heavy cast. No flinch, only the shake. */
   rumble(amount: number) {
     this.shake = Math.min(1, this.shake + amount);
@@ -551,6 +570,20 @@ export class View {
       player.yaw + (Math.random() - 0.5) * sh,
       bobX * 0.4 + (Math.random() - 0.5) * sh,
     );
+    if (this.wakeT < 3.2) {
+      this.wakeT += dt;
+      const t = this.wakeT;
+      // lying on your side, then up onto hands and knees, then standing
+      const up = THREE.MathUtils.smootherstep(t, 1.3, 3.0);
+      this.camera.position.y -= 1.38 * (1 - up);
+      this.camera.rotation.z += 1.1 * (1 - THREE.MathUtils.smootherstep(t, 0.9, 2.5));
+      this.camera.rotation.x += 0.22 * (1 - up) + Math.sin(up * Math.PI) * -0.18;
+      // the eyes: a first look, a slow blink, then open
+      this.eyesOpen = Math.min(1, THREE.MathUtils.smoothstep(t, 0.25, 0.9) * 0.75 - Math.exp(-(((t - 1.2) / 0.16) ** 2)) * 0.7 + THREE.MathUtils.smoothstep(t, 1.4, 2.2) * 0.25);
+      this.eyesOpen = Math.max(0, this.eyesOpen);
+    } else {
+      this.eyesOpen = 1;
+    }
     const wantFov = this.baseFov + (player.dodging ? 7 : 0);
     if (Math.abs(this.camera.fov - wantFov) > 0.05) {
       this.camera.fov += (wantFov - this.camera.fov) * Math.min(1, dt * 12);

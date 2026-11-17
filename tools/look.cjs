@@ -40,6 +40,7 @@ const SCENARIOS = {
     for (const [k, x, z] of [['drowned', -1.6, -59.6], ['drowned', 0.2, -60.4], ['drowned', 1.7, -59.8], ['spitter', 3.4, -62.5]]) g.debug.spawn(k, x, z);
     g.debug.advance(1.2); g.input.inject('key', 'ArrowUp'); g.debug.advance(0.5);`,
   halfnight: `g.debug.start(); g.debug.night(0.5); g.debug.teleport(0, -24, 0, 0); g.debug.advance(0.3);`,
+  waking: `g.debug.start(); g.view.wake(); g.debug.advance(1.75);`,
   fireball: `g.debug.start(); g.debug.learnAll(); g.debug.teleport(0, -56, 0, -0.08);
     for (const [x, z] of [[-2, -66], [1, -67], [3, -65], [0, -69]]) g.debug.spawn('drowned', x, z);
     g.debug.advance(1.4); g.debug.lookAt(0.5, 5.6, -66.5); g.debug.say('fire', 'fire'); g.debug.advance(0.5);`,

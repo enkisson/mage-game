@@ -61,23 +61,23 @@ html, body { margin: 0; height: 100%; background: #05040c; overflow: hidden; }
 .label { font-size: 12px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--bone-dim); font-weight: 600; margin-bottom: -5px; }
 
 /* ---- the sentence and the four keys ---- */
-.speech { position: absolute; left: 50%; bottom: 28px; transform: translateX(-50%); display: grid; justify-items: center; gap: 12px; }
-.spell { height: 30px; font-family: var(--display); font-size: 30px; font-weight: 500; line-height: 1; letter-spacing: 0.02em; display: flex; align-items: baseline; gap: 10px; }
+.speech { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); display: grid; justify-items: center; gap: 8px; }
+.spell { height: 24px; font-family: var(--display); font-size: 25px; font-weight: 500; line-height: 1; letter-spacing: 0.02em; display: flex; align-items: baseline; gap: 10px; }
 .spell .cost { font: 600 15px var(--ui); color: var(--ward); letter-spacing: 0.08em; }
 .spell.unknown .name { color: var(--bone-dim); font-style: italic; }
 .spell.cast .name { animation: named 0.9s ease-out forwards; }
 @keyframes named { from { opacity: 1; transform: translateY(0); } to { opacity: 0; transform: translateY(-14px); } }
-.sentence { display: flex; gap: 8px; height: 56px; align-items: center; }
+.sentence { display: flex; gap: 6px; height: 44px; align-items: center; }
 .sentence.shake { animation: shake 0.3s; }
-.word { width: 52px; height: 52px; display: grid; place-items: center; border: 1px dashed rgba(226, 219, 198, 0.4); background: rgba(10, 8, 26, 0.35); clip-path: polygon(8px 0, calc(100% - 8px) 0, 100% 8px, 100% calc(100% - 8px), calc(100% - 8px) 100%, 8px 100%, 0 calc(100% - 8px), 0 8px); }
+.word { width: 40px; height: 40px; display: grid; place-items: center; border: 1px dashed rgba(226, 219, 198, 0.4); background: rgba(10, 8, 26, 0.35); clip-path: polygon(8px 0, calc(100% - 8px) 0, 100% 8px, 100% calc(100% - 8px), calc(100% - 8px) 100%, 8px 100%, 0 calc(100% - 8px), 0 8px); }
 .word.locked { opacity: 0.35; }
 .word.said { border: 2px solid var(--c); background: linear-gradient(180deg, color-mix(in srgb, var(--c) 28%, #17133a), #0d0b22); box-shadow: inset 0 0 16px color-mix(in srgb, var(--c) 40%, transparent); color: var(--c); animation: said 0.18s ease-out; }
-.word svg { width: 32px; height: 32px; filter: drop-shadow(0 0 6px var(--c)); }
+.word svg { width: 25px; height: 25px; filter: drop-shadow(0 0 6px var(--c)); }
 @keyframes said { from { transform: scale(1.35); } to { transform: scale(1); } }
 @keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-6px); } 75% { transform: translateX(6px); } }
 
-.keys { display: grid; grid-template-columns: repeat(3, 84px); grid-template-rows: repeat(2, 44px); gap: 5px; }
-.key { display: grid; grid-template-columns: 26px 1fr; align-items: center; gap: 6px; padding: 0 8px; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; font-size: 15px; font-weight: 600; letter-spacing: 0.04em; color: var(--bone-dim); }
+.keys { display: grid; grid-template-columns: repeat(3, 74px); grid-template-rows: repeat(2, 34px); gap: 4px; opacity: 0.78; }
+.key { display: grid; grid-template-columns: 26px 1fr; align-items: center; gap: 6px; padding: 0 8px; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; font-size: 13px; font-weight: 600; letter-spacing: 0.04em; color: var(--bone-dim); }
 .key.up { grid-column: 2; grid-row: 1; } .key.left { grid-column: 1; grid-row: 2; } .key.down { grid-column: 2; grid-row: 2; } .key.right { grid-column: 3; grid-row: 2; }
 .key .glyph { width: 24px; height: 24px; opacity: 0.25; }
 .key .arrow { color: rgba(226, 219, 198, 0.4); font-size: 16px; text-align: center; }
@@ -170,3 +170,6 @@ html, body { margin: 0; height: 100%; background: #05040c; overflow: hidden; }
 .loading .meter { width: min(360px, 70vw); height: 4px; background: rgba(226, 219, 198, 0.15); }
 .loading .meter i { display: block; height: 100%; width: 0; background: var(--gloam); box-shadow: 0 0 12px var(--gloam); transition: width 0.3s; }
 .loading .what { font-size: 16px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--bone-dim); }
+
+/* ---- waking: the eyes open ---- */
+.eyelids { position: absolute; inset: 0; background: #020106; opacity: 0; pointer-events: none; }

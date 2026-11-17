@@ -205,6 +205,7 @@ export class Game {
   private begin() {
     this.hud.hideOverlay();
     this.mode = 'playing';
+    this.view.wake();
     this.input.requestLock();
     this.announce();
   }
@@ -563,6 +564,7 @@ export class Game {
         this.respawn();
         this.hud.hideOverlay();
         this.mode = 'playing';
+        this.view.wake();
         this.announce();
       }
     }
@@ -606,6 +608,11 @@ export class Game {
       const live = this.mode === 'playing' || this.mode === 'dead';
       this.sound.update(dt, cam.position, this.player.yaw, live ? shore : shore * 0.5, height, live && this.caster.sentence.length ? 1 : 0);
     }
+    // waking: the picture swims into focus as the eyes open
+    const open = this.view.eyesOpen;
+    this.hud.eyes(open);
+    const blur = open < 0.995 ? `blur(${((1 - open) * 9).toFixed(1)}px)` : '';
+    if (this.renderer.domElement.style.filter !== blur) this.renderer.domElement.style.filter = blur;
     this.sky.setNight(this.night);
     seaUniforms.uNight.value = this.night;
     this.renderer.toneMappingExposure = THREE.MathUtils.lerp(1.05, 1.2, this.night);

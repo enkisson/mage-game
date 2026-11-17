@@ -54,6 +54,7 @@ export class Hud {
     this.root.innerHTML = `
       <div class="vignette"></div>
       <div class="hurt"></div>
+      <div class="eyelids"></div>
       <div class="numbers"></div>
       <div class="place"></div>
       <div class="banner"><div class="big"></div><div class="small"></div></div>
@@ -198,6 +199,14 @@ export class Hud {
     this.promptText = text;
     this.promptEl.innerHTML = text;
   }
+
+  /** How far the eyes are open, 0 to 1: waking on the sand. */
+  eyes(open: number) {
+    if (!this.lids) this.lids = this.root.querySelector('.eyelids') as HTMLElement;
+    const shut = String(Math.round((1 - open) * 100) / 100);
+    if (this.lids.style.opacity !== shut) this.lids.style.opacity = shut;
+  }
+  private lids: HTMLElement | null = null;
 
   setPlace(kicker: string, title: string, sub = '', pips: boolean[] = []) {
     this.placeEl.innerHTML = `

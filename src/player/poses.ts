@@ -16,6 +16,10 @@ export const BRACE: ArmPose = { at: [0.31, -0.39, -0.36], fingers: [-0.25, 0.55,
 /** Fingers flicked open, letting an unfinished sentence fall. */
 export const LET_GO: ArmPose = { at: [0.27, -0.33, -0.46], fingers: [-0.15, 0.3, -0.94], palm: [-0.6, -0.75, 0.1], shape: 'splay' };
 
+/** Waking: face down on the sand, a hand planted to push yourself up. */
+export const PLANTED: ArmPose = { at: [0.25, -0.4, -0.42], fingers: [-0.05, 0.25, -0.97], palm: [0, -0.97, -0.2], shape: 'splay' };
+export const SPRAWLED: ArmPose = { at: [0.34, -0.62, -0.3], fingers: [-0.1, 0.1, -0.99], palm: [0, -1, 0], shape: 'relaxed' };
+
 /** The sign each sigil is held in while the sentence is being spoken. */
 export const HOLD: Record<SigilId, ArmPose> = {
   // cupped upward, a coal in the palm
