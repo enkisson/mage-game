@@ -1,12 +1,12 @@
-// The sea. The sky in it, moving; deep green-black out in the bay, clear over the sand in the
-// shallows; sets of waves coming in and breaking white along the beach and round the rocks,
-// leaving lace on the water behind them. At night the broken water glows with sea-fire.
+// The sea in a storm. Swell rolls in from the south and steepens as the water shallows; the
+// crests break into whitewater that covers the shallows, churns against the cliffs and the
+// stacks, and drains back down the black sand. Beyond the surf the water is dark slate,
+// streaked with old foam and carrying the grey of the sky.
 import * as THREE from 'three';
 import { fogUniforms } from './atmosphere';
 import type { Ground } from './terrain';
 
 function waveNormals(size = 512): THREE.DataTexture {
-  // a tileable chop: a few dozen waves of random direction and length, summed
   const r = (() => { let s = 7; return () => ((s = (s * 16807) % 2147483647) / 2147483647); })();
   const waves: [number, number, number, number][] = [];
   for (let k = 0; k < 90; k++) {
@@ -36,76 +36,151 @@ function waveNormals(size = 512): THREE.DataTexture {
 export const oceanUniforms = {
   uTime: { value: 0 },
   uNight: { value: 0 },
-  uSand: { value: new THREE.Color(0x8a7c66) },
+  uSand: { value: new THREE.Color(0x15151a) },
 };
 
-export function buildOcean(ground: Ground, opts: { level?: number; size?: number; deep?: number; shallow?: number } = {}): THREE.Mesh {
+const SWELL = /* glsl */ `
+  uniform sampler2D uHeights;
+  uniform vec3 uGround;
+  uniform float uTime, uLevel, uSwell;
+  vec2 groundAt(vec2 xz) {
+    vec2 hp = (xz - uGround.xy) / uGround.z;
+    if (hp.x < 0.0 || hp.y < 0.0 || hp.x > 1.0 || hp.y > 1.0) return vec2(-60.0, -200.0);
+    return texture2D(uHeights, hp).rg;
+  }
+  // the long swell: a few trains from the south and south-west, their crests bending toward
+  // the beach as they feel the bottom
+  float swellPhase(vec2 p, float depth, int k) {
+    vec2 dir = k == 0 ? normalize(vec2(0.12, -1.0)) : k == 1 ? normalize(vec2(0.45, -1.0)) : normalize(vec2(-0.2, -1.0));
+    float len = k == 0 ? 34.0 : k == 1 ? 21.0 : 13.0;
+    // in shallow water the waves slow and crowd together
+    float slow = mix(0.55, 1.0, smoothstep(1.0, 14.0, depth));
+    return dot(dir, p) * 6.2832 / (len * slow) - uTime * (k == 0 ? 0.9 : k == 1 ? 1.15 : 1.5) + float(k) * 2.1;
+  }
+  float swellHeight(vec2 p, float depth, out float crest) {
+    float grow = smoothstep(0.3, 2.5, depth) * (1.0 + 0.5 * (1.0 - smoothstep(2.5, 12.0, depth)));
+    float h = 0.0;
+    crest = 0.0;
+    for (int k = 0; k < 3; k++) {
+      float ph = swellPhase(p, depth, k);
+      float a = (k == 0 ? 1.0 : k == 1 ? 0.55 : 0.25) * uSwell;
+      // peaked crests, broad troughs
+      float s = sin(ph) * 0.5 + 0.5;
+      float w = pow(s, 2.2) * 2.0 - 0.6;
+      h += w * a * grow;
+      crest += pow(s, 6.0) * (k == 0 ? 1.0 : 0.6);
+    }
+    return h;
+  }`;
+
+export function buildOcean(ground: Ground, opts: { level?: number; deep?: number; shallow?: number; centre?: [number, number]; size?: [number, number]; step?: number } = {}): THREE.Group {
   const level = opts.level ?? 0;
-  const size = opts.size ?? 40000;
-  const geo = new THREE.PlaneGeometry(size, size, 1, 1);
-  geo.rotateX(-Math.PI / 2);
-  geo.translate(0, level, 0);
-  const m = new THREE.MeshPhysicalMaterial({ color: opts.deep ?? 0x061418, roughness: 0.05, metalness: 0, transparent: true, clearcoat: 0, ior: 1.33 });
   const nor = waveNormals();
   const u = {
     uNor: { value: nor }, uHeights: { value: ground.heights },
     uGround: { value: new THREE.Vector3(ground.bounds.minX, ground.bounds.minZ, ground.bounds.size) },
-    uShallow: { value: new THREE.Color(opts.shallow ?? 0x123230) }, uLevel: { value: level },
+    uShallow: { value: new THREE.Color(opts.shallow ?? 0x2a3a38) }, uLevel: { value: level }, uSwell: { value: 0.42 },
   };
-  m.onBeforeCompile = (shader) => {
-    Object.assign(shader.uniforms, u, oceanUniforms);
-    fogUniforms(shader);
-    shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\n varying vec3 vOPos;')
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\n vOPos = (modelMatrix * vec4(position, 1.0)).xyz;');
-    shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', `#include <common>
-        uniform sampler2D uNor, uHeights;
-        uniform vec3 uGround, uShallow, uSand;
-        uniform float uTime, uNight, uLevel;
-        varying vec3 vOPos;
-        float oFoam, oDepth;
-        vec3 oN;
-        float oh(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
-        float on(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
-          return mix(mix(oh(i), oh(i + vec2(1, 0)), f.x), mix(oh(i + vec2(0, 1)), oh(i + vec2(1, 1)), f.x), f.y); }
-        float ofbm(vec2 p) { return on(p) * 0.55 + on(p * 2.1 + 3.1) * 0.3 + on(p * 4.3 + 7.7) * 0.15; }`)
-      .replace('#include <map_fragment>', `
-        vec2 hp = (vOPos.xz - uGround.xy) / uGround.z;
-        float ground = (hp.x > 0.0 && hp.y > 0.0 && hp.x < 1.0 && hp.y < 1.0) ? texture2D(uHeights, hp).r : -40.0;
-        oDepth = uLevel - ground;
-        // the surface: long swell from the south, chop on it, finer near at hand
-        vec2 p = vOPos.xz;
-        mat2 r1 = mat2(0.8, -0.6, 0.6, 0.8), r2 = mat2(0.28, 0.96, -0.96, 0.28);
-        vec3 n1 = texture2D(uNor, p * 0.011 + vec2(0.0, uTime * 0.008)).xyz * 2.0 - 1.0;
-        vec3 n2 = texture2D(uNor, (r1 * p) * 0.037 + vec2(uTime * 0.011, -uTime * 0.006)).xyz * 2.0 - 1.0;
-        vec3 n3 = texture2D(uNor, (r2 * p) * 0.13 - vec2(uTime * 0.02, uTime * 0.014)).xyz * 2.0 - 1.0;
-        // calmer in patches, as wind lies on the water unevenly
-        float gust = 0.55 + 0.45 * ofbm(p * 0.006 + uTime * 0.003);
-        vec2 slope = (n1.xy * 1.8 + n2.xy * 1.1 + n3.xy * 0.55) * gust;
-        // sets of waves rolling in toward the beach, steepening as the water shallows
-        float shoal = smoothstep(9.0, 0.5, oDepth);
-        float ph = p.y * 0.55 - uTime * 1.1 + ofbm(p * 0.03) * 6.0;
-        slope.y += cos(ph) * 0.55 * shoal;
-        oN = normalize(vec3(-slope.x, 1.0, -slope.y));
-        // foam: the breaking crest in the shallows, its lace behind, a line where it meets the sand
-        float crest = smoothstep(0.45, 1.0, sin(ph)) * smoothstep(4.5, 0.6, oDepth) * smoothstep(0.0, 0.25, oDepth) * (0.5 + 0.5 * on(p * vec2(0.08, 0.5)));
-        float lace = smoothstep(0.52, 0.75, ofbm(p * vec2(0.35, 0.9) + vec2(0.0, -uTime * 0.25))) * smoothstep(5.0, 0.8, oDepth);
-        float edge = smoothstep(0.35, 0.0, oDepth) * (0.6 + 0.4 * on(p * 3.0 + uTime));
-        oFoam = clamp(crest * (0.75 + 0.25 * on(p * 2.0)) * 1.3 + lace * 0.65 + edge, 0.0, 1.0);
-        // body: dark and green in the deep, the sand showing through in the shallows
-        float clear = smoothstep(2.5, 0.0, oDepth);
-        vec3 body = mix(diffuseColor.rgb, uShallow, smoothstep(14.0, 2.0, oDepth));
-        body = mix(body, uSand * 0.4, clear * 0.7);
-        diffuseColor.rgb = mix(body, vec3(0.85, 0.88, 0.9), oFoam);
-        diffuseColor.a = mix(smoothstep(0.0, 0.9, oDepth) * 0.9 + 0.1, 1.0, oFoam) * smoothstep(-0.05, 0.05, oDepth);`)
-      .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = mix(0.035 + (1.0 - smoothstep(0.0, 400.0, length(vOPos.xz - cameraPosition.xz))) * 0.03, 0.75, oFoam);')
-      .replace('#include <normal_fragment_maps>', 'normal = normalize((viewMatrix * vec4(normalize(mix(oN, vec3(0.0, 1.0, 0.0), oFoam * 0.7)), 0.0)).xyz);')
-      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
-        totalEmissiveRadiance += vec3(0.05, 0.6, 0.75) * oFoam * oFoam * uNight * (0.6 + 0.4 * on(p * 0.7 + uTime * 0.3));`);
+  const make = (displace: boolean) => {
+    const m = new THREE.MeshPhysicalMaterial({ color: opts.deep ?? 0x0a1214, roughness: 0.08, metalness: 0, transparent: true, ior: 1.33 });
+    m.onBeforeCompile = (shader) => {
+      Object.assign(shader.uniforms, u, oceanUniforms);
+      fogUniforms(shader);
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', `#include <common>\n varying vec3 vOPos;\n varying float vCrest;\n${SWELL}`)
+        .replace('#include <begin_vertex>', `#include <begin_vertex>
+          vec4 ow = modelMatrix * vec4(position, 1.0);
+          vCrest = 0.0;
+          ${displace ? `
+          vec2 g = groundAt(ow.xz);
+          float depth = uLevel - g.x;
+          float crest;
+          float h = swellHeight(ow.xz, depth, crest);
+          // the surf zone collapses into a churning sheet that runs up the sand
+          h *= smoothstep(0.0, 1.2, depth);
+          transformed.y += h;
+          vCrest = crest;` : ''}
+          vOPos = (modelMatrix * vec4(transformed, 1.0)).xyz;`);
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', `#include <common>
+          uniform sampler2D uNor;
+          uniform vec3 uShallow, uSand;
+          uniform float uNight;
+          varying vec3 vOPos;
+          varying float vCrest;
+          ${SWELL}
+          float oFoam, oDepth;
+          vec3 oN;
+          float oh(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+          float on(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+            return mix(mix(oh(i), oh(i + vec2(1, 0)), f.x), mix(oh(i + vec2(0, 1)), oh(i + vec2(1, 1)), f.x), f.y); }
+          float ofbm(vec2 p) { return on(p) * 0.5 + on(p * 2.1 + 3.1) * 0.27 + on(p * 4.3 + 7.7) * 0.15 + on(p * 8.7 + 1.3) * 0.08; }`)
+        .replace('#include <map_fragment>', `
+          vec2 p = vOPos.xz;
+          vec2 g = groundAt(p);
+          oDepth = uLevel - g.x;
+          float rock = g.y; // > 0 inside rock, the distance to it outside
+          // slope from the swell, sampled either side, and chop on top
+          float c0, c1, c2;
+          float e = 0.6;
+          float sh0 = swellHeight(p, oDepth, c0);
+          float shx = swellHeight(p + vec2(e, 0.0), oDepth, c1);
+          float shz = swellHeight(p + vec2(0.0, e), oDepth, c2);
+          vec2 slope = vec2(shx - sh0, shz - sh0) / e * smoothstep(0.0, 1.2, oDepth);
+          mat2 r1 = mat2(0.8, -0.6, 0.6, 0.8), r2 = mat2(0.28, 0.96, -0.96, 0.28);
+          vec3 n1 = texture2D(uNor, p * 0.021 + vec2(0.0, uTime * 0.012)).xyz * 2.0 - 1.0;
+          vec3 n2 = texture2D(uNor, (r1 * p) * 0.07 + vec2(uTime * 0.016, -uTime * 0.01)).xyz * 2.0 - 1.0;
+          vec3 n3 = texture2D(uNor, (r2 * p) * 0.23 - vec2(uTime * 0.03, uTime * 0.02)).xyz * 2.0 - 1.0;
+          slope += n1.xy * 0.5 + n2.xy * 0.4 + n3.xy * 0.25;
+          // foam
+          float crest = c0;
+          // breaking crests: where the swell is steep and the water shallow, the whole crest goes white
+          float churn = ofbm(p * vec2(0.22, 0.4) + vec2(0.0, -uTime * 0.2)) + ofbm(p * 1.1 + uTime * 0.1) * 0.35 + 0.06;
+          float lace = ofbm(p * vec2(0.7, 1.4) + churn * 1.5);
+          float breaking = smoothstep(0.55, 0.95, crest) * smoothstep(7.0, 2.5, oDepth) * smoothstep(0.0, 1.0, oDepth) * smoothstep(0.35, 0.6, lace + 0.1);
+          // the whitewater across the surf zone: sheets broken into holes and lace, dark water between
+          float surf = smoothstep(4.0, 0.6, oDepth) * smoothstep(0.55, 0.78, churn + (1.0 - smoothstep(0.0, 2.5, oDepth)) * 0.25) * smoothstep(0.3, 0.55, lace);
+          // foam round the cliffs and the stacks, thrown up where the water meets rock
+          float atRock = smoothstep(-12.0, 0.0, rock) * smoothstep(0.55, 0.78, churn + smoothstep(-4.0, 0.0, rock) * 0.35) * smoothstep(0.3, 0.5, lace);
+          // old foam left on the surface in long streaks, pulled by the wind
+          float streaks = smoothstep(0.6, 0.8, ofbm(p * vec2(0.05, 0.22) + vec2(ofbm(p * 0.02) * 2.0, 0.0))) * 0.55 * (1.0 - smoothstep(30.0, 90.0, oDepth));
+          // the last of a wave sliding up the sand
+          float swash = smoothstep(0.4, 0.0, oDepth) * smoothstep(0.4, 0.65, lace) * (0.5 + 0.5 * on(p * 2.0 + uTime));
+          oFoam = clamp(max(max(breaking, surf), max(atRock, swash)) + streaks, 0.0, 1.0);
+          // body: dark slate out in the bay, turbid grey-green where the sand is stirred up
+          vec3 body = mix(diffuseColor.rgb, uShallow, smoothstep(16.0, 2.0, oDepth));
+          body = mix(body, uSand, smoothstep(1.2, 0.0, oDepth) * 0.6);
+          // foam has body: brighter where it heaps up, grey and thin at its edges
+          float heap = ofbm(p * 2.2 + uTime * 0.2);
+          vec3 foamC = mix(vec3(0.42, 0.46, 0.48), vec3(0.86, 0.88, 0.89), smoothstep(0.25, 0.8, heap) * smoothstep(0.1, 0.6, oFoam));
+          diffuseColor.rgb = mix(body, foamC, oFoam);
+          diffuseColor.a = mix(smoothstep(0.0, 0.6, oDepth) * 0.85 + 0.15, 1.0, smoothstep(0.0, 0.5, oFoam)) * smoothstep(-0.05, 0.03, oDepth);
+          slope += (vec2(on(p * 3.5), on(p * 3.5 + 5.0)) - 0.5) * oFoam * 1.4;
+          oN = normalize(vec3(-slope.x, 1.0, -slope.y));`)
+        .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = mix(0.07, 0.85, oFoam);')
+        .replace('#include <normal_fragment_maps>', 'normal = normalize((viewMatrix * vec4(oN, 0.0)).xyz);')
+        .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+          totalEmissiveRadiance += vec3(0.05, 0.6, 0.75) * oFoam * oFoam * uNight * (0.6 + 0.4 * on(p * 0.7 + uTime * 0.3));`);
+    };
+    m.customProgramCacheKey = () => 'ocean' + displace;
+    return m;
   };
-  const mesh = new THREE.Mesh(geo, m);
-  mesh.receiveShadow = true;
-  mesh.renderOrder = 2;
-  return mesh;
+  const g = new THREE.Group();
+  // near: finely divided so the swell can be in its shape
+  const [cx, cz] = opts.centre ?? [-60, 180], [sx, sz] = opts.size ?? [640, 420], step = opts.step ?? 0.8;
+  const near = new THREE.PlaneGeometry(sx, sz, Math.round(sx / step), Math.round(sz / step));
+  near.rotateX(-Math.PI / 2);
+  near.translate(cx, level, cz);
+  const nearMesh = new THREE.Mesh(near, make(true));
+  nearMesh.receiveShadow = true;
+  nearMesh.renderOrder = 2;
+  nearMesh.frustumCulled = false;
+  // far: flat, out to the horizon, just under the near sheet
+  const farGeo = new THREE.PlaneGeometry(60000, 60000, 1, 1);
+  farGeo.rotateX(-Math.PI / 2);
+  farGeo.translate(cx, level - 0.6, cz);
+  const farPlane = new THREE.Mesh(farGeo, make(false));
+  farPlane.renderOrder = 1;
+  g.add(nearMesh, farPlane);
+  return g;
 }

@@ -81,7 +81,8 @@ export function beam(at: THREE.Vector3, height: number, radius: number, color: T
  * The falls: white water in strands coming down a face, thickening and breaking into spray
  * toward the foot.
  */
-export function falls(top: THREE.Vector3, bottom: THREE.Vector3, width: number): THREE.Group {
+export function falls(top: THREE.Vector3, bottom: THREE.Vector3, width: number, opts: { bright?: number; spray?: number; mist?: THREE.ColorRepresentation } = {}): THREE.Group {
+  const bright = opts.bright ?? 1, spray = opts.spray ?? 0;
   const g = new THREE.Group();
   const height = top.y - bottom.y;
   const geo = new THREE.PlaneGeometry(1, 1, 16, 32);
@@ -96,7 +97,7 @@ export function falls(top: THREE.Vector3, bottom: THREE.Vector3, width: number):
   geo.computeVertexNormals();
   const m = new THREE.ShaderMaterial({
     transparent: true, depthWrite: false, side: THREE.DoubleSide, fog: true,
-    uniforms: { uTime: { value: 0 }, ...THREE.UniformsLib.fog, fogSunDir: air.sunDir, fogSunColor: air.sunColor, fogFalloff: air.falloff, fogGlowPower: air.glowPower },
+    uniforms: { uTime: { value: 0 }, uBright: { value: bright }, uSpray: { value: spray }, ...THREE.UniformsLib.fog, fogSunDir: air.sunDir, fogSunColor: air.sunColor, fogFalloff: air.falloff, fogGlowPower: air.glowPower },
     vertexShader: `
 #include <fog_pars_vertex>
 varying vec2 vUv;
@@ -109,7 +110,7 @@ void main() {
 }`,
     fragmentShader: `
 #include <fog_pars_fragment>
-      varying vec2 vUv; uniform float uTime;
+      varying vec2 vUv; uniform float uTime, uBright, uSpray;
       float h(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
       float n(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f); return mix(mix(h(i), h(i+vec2(1,0)), f.x), mix(h(i+vec2(0,1)), h(i+vec2(1,1)), f.x), f.y); }
       void main(){
@@ -118,7 +119,9 @@ void main() {
         float sides = smoothstep(0.0, 0.18, vUv.x) * smoothstep(1.0, 0.82, vUv.x);
         float foot = smoothstep(0.25, 0.0, vUv.y);
         float a = (0.35 + body * 0.6 + foot * 0.4) * sides;
-        vec3 c = mix(vec3(0.42, 0.46, 0.52), vec3(0.78, 0.8, 0.84), body);
+        // thin falls are torn to spray by the wind before they reach the ground
+        a *= mix(1.0, smoothstep(0.0, 0.7, vUv.y) * (0.35 + 0.65 * n(vec2(vUv.x * 8.0, vUv.y * 6.0 + uTime))), uSpray);
+        vec3 c = mix(vec3(0.42, 0.46, 0.52), vec3(0.78, 0.8, 0.84), body) * uBright;
         gl_FragColor = vec4(c, a);
 #include <fog_fragment>
       }`,
@@ -127,6 +130,6 @@ void main() {
   g.add(sheet);
   g.position.copy(bottom);
   g.lookAt(new THREE.Vector3(bottom.x, bottom.y, bottom.z + 1));
-  g.add(mistBank(new THREE.Vector3(0, 1, 2), width * 3, 8, 0xc8d0dc, 0.55, 7, 4));
+  g.add(mistBank(new THREE.Vector3(0, 1, 2), width * 3, width * 1.4, opts.mist ?? 0xc8d0dc, 0.55, 7, 4));
   return g;
 }

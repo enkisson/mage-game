@@ -3,10 +3,10 @@
 import * as THREE from 'three';
 import { groundHeight } from './layout';
 
-export function marram(spots: { x: number; z: number; size: number }[], seed = 7): THREE.Mesh {
+export function marram(spots: { x: number; z: number; size: number }[], seed = 7, colors: [number, number, number] = [0xc8b47e, 0x8a9658, 0x9a8464]): THREE.Mesh {
   const r = (() => { let q = seed * 7919; return () => ((q = (q * 16807) % 2147483647) / 2147483647); })();
   const pos: number[] = [], col: number[] = [], nor: number[] = [];
-  const straw = new THREE.Color(0xc8b47e), green = new THREE.Color(0x8a9658), dead = new THREE.Color(0x9a8464);
+  const straw = new THREE.Color(colors[0]), green = new THREE.Color(colors[1]), dead = new THREE.Color(colors[2]);
   const wind = new THREE.Vector2(0.5, 0.86);
   for (const s of spots) {
     const gy = groundHeight(s.x, s.z);

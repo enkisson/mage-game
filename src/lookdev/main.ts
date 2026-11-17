@@ -6,8 +6,7 @@ import { loadGlb } from '../art/gltf';
 import kitSrc from '../../art/concepts/kit.js?raw';
 import commonSrc from '../../art/concepts/common.js?raw';
 import { buildBay } from '../world/coast/bay';
-import { oceanUniforms } from '../world/coast/ocean';
-import { air, applySky, loadSky, patchFog } from '../world/coast/atmosphere';
+import { air, patchFog, stormSky } from '../world/coast/atmosphere';
 import { groundHeight } from '../world/coast/layout';
 
 const W = 1920, H = 1080;
@@ -72,83 +71,68 @@ async function sheet(names: string[], skyName = 'dusk2'): Promise<string[]> {
 
 // ---- concept shots of the Wreck Shore ------------------------------------------------------------
 let bay: Awaited<ReturnType<typeof buildBay>> | null = null;
-let sunLight: THREE.DirectionalLight | null = null;
-const DUSK = {
-  sunAzimuth: THREE.MathUtils.degToRad(250), sunElevation: THREE.MathUtils.degToRad(2.5), sunColor: 0xff8a50, sunIntensity: 2.2,
-  envIntensity: 0.9, backgroundIntensity: 0.9, fog: 0x6a5a78, fogDensity: 0.0006, fogSun: 0xff9a60, at: new THREE.Vector3(-30, 0, 0), area: 220,
-};
-const NIGHT = {
-  sunAzimuth: THREE.MathUtils.degToRad(232), sunElevation: THREE.MathUtils.degToRad(14), sunColor: 0x9ab8ff, sunIntensity: 0.32,
-  envIntensity: 0.12, backgroundIntensity: 0.1, fog: 0x0c1220, fogDensity: 0.0008, fogSun: 0x2a3858, at: new THREE.Vector3(-30, 0, 0), area: 220,
-};
-let mood = 'dusk';
-/** Dusk, or the same bay under the moon. */
-async function setMood(scene: THREE.Scene, want: 'dusk' | 'night') {
-  if (mood === want) return;
-  mood = want;
-  if (sunLight) { scene.remove(sunLight, sunLight.target); sunLight.dispose(); }
-  if (want === 'night') {
-    // the moon in this sky stands at its brightest column
-    sunLight = applySky(scene, renderer, await loadSky(base + 'sky/moon.hdr', MOON_U), NIGHT);
-    oceanUniforms.uNight.value = 1;
-  } else {
-    sunLight = applySky(scene, renderer, await loadSky(base + 'sky/dusk.hdr', 1301 / 2048), DUSK);
-    oceanUniforms.uNight.value = 0;
-  }
-}
-const MOON_U = 0.6;
 let bayScene: THREE.Scene | null = null;
 async function bayReady(): Promise<THREE.Scene> {
   if (bayScene) return bayScene;
   patchFog();
   const scene = new THREE.Scene();
   const kit = new Map<string, THREE.Object3D>();
-  const names = ['coastal_cliff_01', 'coastal_cliff_02', 'coastal_cliff_04', 'coast_rocks_01', 'coast_rocks_03', 'coast_rocks_05', 'coast_land_rocks_02', 'coast_land_rocks_03',
-    'coast_line_02', 'sand_rocks_small_01', 'rock_face_01', 'mountainside', 'dutch_ship_large_01', 'wooden_barrels_01', 'wooden_crate_01', 'treasure_chest',
-    'dead_tree_trunk', 'root_cluster_01', 'lambis_shell', 'wooden_lantern_01'];
+  const names = ['dutch_ship_large_01', 'wooden_barrels_01', 'wooden_crate_01', 'treasure_chest', 'dead_tree_trunk', 'root_cluster_01', 'lambis_shell', 'wooden_lantern_01', 'gothic_statue'];
   await Promise.all(names.map(async (n) => kit.set(n, await model(n))));
   bay = await buildBay((n) => { const m = kit.get(n); if (!m) throw new Error('no model ' + n); return m.clone(true); }, base);
   scene.add(bay.root);
-  sunLight = applySky(scene, renderer, await loadSky(base + 'sky/dusk.hdr', 1301 / 2048), DUSK);
-  air.falloff.value = 0.0022;
+  stormSky(scene, renderer, STORM);
+  air.falloff.value = 0.012;
+  air.glowPower.value = 3;
   bayScene = scene;
   return scene;
 }
 
-const SHOTS: Record<string, { pos: [number, number, number]; look: [number, number, number]; fov: number; exposure: number; grade?: Grade; night?: boolean }> = {
-  waking: { pos: [-13.5, 1.2, 5.5], look: [-64, 10, -5], fov: 50, exposure: 0.9, grade: { shafts: 1.4 } },
-  mage: { pos: [-16.6, 1.0, 3.2], look: [-20.4, 0.6, 0.4], fov: 45, exposure: 0.9 },
-  falls: { pos: [-14, 1.7, -12], look: [-30, 12, -44], fov: 55, exposure: 0.9 },
-  arrival: { pos: [-30, 4, 58], look: [-58, 11, -8], fov: 48, exposure: 0.9, grade: { shafts: 1.2 } },
-  hull: { pos: [-52, 1.0, 12], look: [-70, 7, -2], fov: 58, exposure: 0.95, grade: { shafts: 1.0 } },
-  night: { pos: [-6, 1.4, 8], look: [-70, 6, 30], fov: 55, exposure: 1.1, night: true, grade: { shafts: 0.4, warm: -0.04, bloom: 0.5 } },
+const STORM = {
+  sunAzimuth: THREE.MathUtils.degToRad(255), sunElevation: THREE.MathUtils.degToRad(14), sunColor: 0xd8d2c8, sunIntensity: 1.5,
+  envIntensity: 1.9, fog: 0x7e858c, fogDensity: 0.0045, fogSun: 0xb8b0a6, at: new THREE.Vector3(-50, 0, 0), area: 360, brightness: 1.0, dark: 0.55,
+};
+
+interface Shot { pos: [number, number, number]; look: [number, number, number]; fov: number; exposure: number; grade?: Grade }
+const SHOTS: Record<string, Shot> = {
+  // the first thing you see: the headland on the right, the stack through the spray, the surf
+  waking: { pos: [10, 1.4, 12], look: [-160, 18, 130], fov: 55, exposure: 1.0 },
+  // the arch with the great fall behind it, the river running out toward you
+  arch: { pos: [24, 1.6, 2], look: [16, 21, -70], fov: 46, exposure: 1.0 },
+  archhigh: { pos: [16, 34, 20], look: [16, 18, -80], fov: 55, exposure: 1.0, grade: { rain: 0 } },
+  // in the canyon: mossy boulders in the river, the fall at its head
+  canyon: { pos: [19, 3.4, -66], look: [16, 22, -118], fov: 58, exposure: 1.05 },
+  // the giant's stair at the headland's foot, surf breaking on it
+  columns: { pos: [-66, 1.6, 30], look: [-104, 9, 42], fov: 55, exposure: 1.0 },
+  // the whole beach, along the north wall toward the headland and the stacks
+  beach: { pos: [95, 2.0, 2], look: [-150, 14, 70], fov: 52, exposure: 1.0 },
+  // the wreck, close
+  wreck: { pos: [-48, 1.6, 30], look: [-72, 8, 14], fov: 55, exposure: 1.0 },
 };
 
 async function shot(name: string): Promise<string> {
   const scene = await bayReady();
   if (name === 'plan') {
-    // straight down over the bay, with a grid every 20 m, for laying things out
-    const cam = new THREE.OrthographicCamera(-160, 160, 90, -90, 1, 2000);
-    cam.position.set(-30, 600, 0);
+    const cam = new THREE.OrthographicCamera(-260, 260, 146, -146, 1, 2000);
+    cam.position.set(-50, 800, 20);
     cam.up.set(0, 0, -1);
-    cam.lookAt(-30, 0, 0);
-    const grid = new THREE.GridHelper(400, 20, 0xffff00, 0x888800);
-    grid.position.set(-30, 40, 0);
+    cam.lookAt(-50, 0, 20);
+    const grid = new THREE.GridHelper(600, 30, 0xffff00, 0x888800);
+    grid.position.set(-50, 60, 20);
     scene.add(grid);
-    renderer.toneMappingExposure = 1.4;
+    renderer.toneMappingExposure = 1.2;
     renderer.render(scene, cam);
     scene.remove(grid);
     return renderer.domElement.toDataURL('image/jpeg', 0.92);
   }
   const s = SHOTS[name];
-  await setMood(scene, s.night ? 'night' : 'dusk');
   const cam = new THREE.PerspectiveCamera(s.fov, W / H, 0.1, 40000);
   cam.position.set(s.pos[0], s.pos[1] + Math.max(0, groundHeight(s.pos[0], s.pos[2])), s.pos[2]);
   cam.lookAt(new THREE.Vector3(...s.look));
   renderer.toneMappingExposure = s.exposure;
   bay!.update(3.0);
   renderer.render(scene, cam);
-  return paintover(scene, cam, s.grade ?? {});
+  return paintover(scene, cam, { shafts: 0, contrast: 1.08, saturation: 0.85, vignette: 0.35, bloom: 0.25, warm: -0.01, rain: 1, ...(s.grade ?? {}) });
 }
 
 // ---- the paintover: light shafts from the sun, bloom, grade, grain -------------------------------
@@ -170,7 +154,29 @@ function pixels(): Uint8ClampedArray {
   x.drawImage(renderer.domElement, 0, 0);
   return x.getImageData(0, 0, W, H).data;
 }
-interface Grade { shafts?: number; contrast?: number; saturation?: number; vignette?: number; bloom?: number; warm?: number }
+interface Grade { shafts?: number; contrast?: number; saturation?: number; vignette?: number; bloom?: number; warm?: number; rain?: number }
+/** Drizzle: thin slanted streaks, faint, blown on the wind. */
+function rain(amount: number) {
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const x = c.getContext('2d')!;
+  let seed = 3;
+  const r = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  for (let i = 0; i < 1100 * amount; i++) {
+    const px = r() * W * 1.2 - W * 0.1, py = r() * H, len = 6 + r() * 18, a = 0.02 + r() * 0.05;
+    x.strokeStyle = `rgba(220,226,232,${a})`;
+    x.lineWidth = 0.5 + r() * 0.5;
+    x.beginPath(); x.moveTo(px, py); x.lineTo(px - len * 0.28, py + len); x.stroke();
+  }
+  const d = x.getImageData(0, 0, W, H).data;
+  const { K } = painting();
+  (K as unknown as { paint(m: null, f: (x: number, y: number, o: number[], c: number, i: number) => boolean | void, add?: boolean): void }).paint(null, (_x, _y, o, _c, i) => {
+    const al = d[i * 4 + 3] / 255;
+    if (al <= 0) return false;
+    o[0] = o[1] = o[2] = 0.75 * al;
+  }, true);
+}
+
 function paintover(scene: THREE.Scene, cam: THREE.PerspectiveCamera, g: Grade): string {
   const main = pixels();
   // where the sky shows: everything solid drawn black against a white sky
@@ -199,6 +205,7 @@ function paintover(scene: THREE.Scene, cam: THREE.PerspectiveCamera, g: Grade): 
     C.shafts({ x: sx, y: sy, threshold: 0.45, strength: g.shafts ?? 0.8, length: 0.92, color: '#ffc08a',
       source: (x: number, y: number) => sky[(Math.min(H - 1, Math.round(y)) * W + Math.min(W - 1, Math.round(x))) * 4] > 160 });
   }
+  if (g.rain) rain(g.rain);
   const out = K.finish({ tonemap: false, contrast: g.contrast ?? 1.12, saturation: g.saturation ?? 1.06, vignette: g.vignette ?? 0.42, grain: 0.02,
     lift: [0.006, 0.006, 0.014], gain: [1.0 + (g.warm ?? 0.02), 1.0, 1.0 - (g.warm ?? 0.02)], aberration: 1.0,
     bloom: { threshold: 0.72, strength: g.bloom ?? 0.35, radii: [6, 22, 70] } });
