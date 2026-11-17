@@ -263,6 +263,7 @@ export class Hud {
       <span><kbd>Tab</kbd></span><span>Your own journal</span>
       <span><kbd>Esc</kbd></span><span>Pause</span>
       <span><kbd>O</kbd></span><span>Effects full or light (use light if it runs slowly)</span>
+      <span><kbd>M</kbd></span><span>Sound on or off</span>
     </div>`;
   }
 

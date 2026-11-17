@@ -8,7 +8,7 @@ tide carries you back to the shore, and the only thing you keep is what you know
 ![Waking on the shore beside your wrecked ship](docs/screens/wake.jpg)
 
 **Status:** first playable slice. The Wreck Shore is built: four sigils, fourteen sentences, two
-creatures, one wave stand. The plan for the rest is in [docs/PLAN.md](docs/PLAN.md).
+creatures, one wave stand, one night. The plan for the rest is in [docs/PLAN.md](docs/PLAN.md).
 
 ## Play
 
@@ -32,6 +32,8 @@ Open the address it prints. It needs a keyboard and a trackpad or mouse.
 | Tab | Your own journal: every sentence you have found |
 | Esc | Pause |
 | [ and ] | Look speed down and up |
+| O | Effects: full, or a lighter set for slower machines |
+| M | Sound on or off |
 
 The pause menu can teach you all four words at once, for testing, and can wipe what you know.
 
@@ -42,10 +44,22 @@ The pause menu can teach you all four words at once, for testing, and can wipe w
   assets from Poly Haven. Everything is bedded into the beach rather than set on it: sand is banked
   along the hull and drifted round every rock, barrel and spar, objects take on sand where they
   meet it, the dry sand is wind-rippled, the tide leaves a wrack line and foam round the sea
-  rocks, and creases are shaded where things touch (`O` turns that shading off, if it is slow).
-- **Your hands.** Fully jointed hands shape each sentence. The first word forms in your left hand,
-  the second in your right; each sigil has its own sign, and each kind of spell its own cast
-  gesture. The sigils you have bound are marked on the backs of your hands.
+  rocks, and creases are shaded where things touch.
+- **One night.** You wake at the last of the dusk. As you go north the sky's light fades and the
+  moon takes over: stars come out, the surf glows where it breaks, and by the cove the brightest
+  things are the ship's lantern and whatever you are holding in your hands.
+- **Your hands.** The first word forms in your left hand, the second in your right. Each sigil has
+  its own sign and its own small motion that makes it; each kind of spell has its own cast, with a
+  wind-up, and the spell leaves the hands on the strike. Wrist, hand and every finger are sprung
+  at slightly different rates, so one motion always flows into the next. The skin is shaded from
+  where each point sits on the hand: nails, knuckle folds, tendons, palm lines, light showing red
+  through the fingers. A held word is visible in the hand (a flame in the cupped palm, stones
+  round the fist, air winding up the fingers, force off the flat palm) and lights the ground.
+- **The dead crew.** The Drowned are the men who went down with your ship: bodies sculpted in code
+  as one skinned surface, in sodden coats, hung with weed and barnacles. The Bloated, weeks in the
+  water, heaves brine at you from range.
+- **Sound.** Surf, wind, footfalls, each word, each cast, the crew, the wards. All of it is
+  generated in code; there are no audio files.
 - **Four sigils:** Fire, Push, Stone, Wind. Each is taught by a journal page. In the full game they
   are spread across the first biomes; here they are all on the shore so the system can be tried.
 - **Fourteen sentences**, from Firebolt to Gale. Seven are in the mage's journals; seven are yours
@@ -57,6 +71,10 @@ The pause menu can teach you all four words at once, for testing, and can wipe w
 - **Death and return.** You wake on the shore again knowing every word and sentence you had.
 
 ![Fire in the left hand, Push in the right](docs/screens/speak.jpg)
+
+![The crew, walking up from the surf](docs/screens/crew.jpg)
+
+![The shore after dark](docs/screens/night.jpg)
 
 ![Every held sign and cast gesture](docs/screens/hands.jpg)
 

@@ -10,6 +10,7 @@ import type { Level, JournalDef, StandDef } from './level';
 import { MATERIALS, waterRipples, seaUniforms, seat, seatInGround } from '../art/materials';
 import { centred, type Models } from '../art/models';
 import { HandRig, SHAPES, shapeToArray } from '../player/hands';
+import { makeCorpse } from '../art/creatures';
 
 export const COVE = { x: 0, z: -70, r: 26 };
 const BOUNDS = { minX: -62, maxX: 62, minZ: -112, maxZ: 62 };
@@ -292,20 +293,12 @@ function body(handModel: THREE.Object3D | null): { group: THREE.Group; journalAt
     g.add(m);
     return m;
   };
-  // lying along -Z, head inland, face down
-  drape([0.4, 0.17, 0.5], [0, 0.03, -0.18], 1); // shoulders and back
-  drape([0.46, 0.13, 0.82], [0.04, 0.02, 0.62], 2, [0, 0.08, 0]); // the robe's skirts, spread by the water
-  drape([0.2, 0.17, 0.25], [0.02, 0.05, -0.74], 3); // the hood
-  drape([0.13, 0.09, 0.36], [0.4, 0.03, -0.72], 4, [0, -0.62, 0]); // the reaching arm in its sleeve
-  drape([0.15, 0.07, 0.2], [0.6, 0.02, -1.0], 5, [0, -0.5, 0]); // the sleeve's wide mouth
-  drape([0.12, 0.08, 0.3], [-0.36, 0.03, -0.2], 6, [0, 0.5, 0]); // the other arm, folded under
-  for (const sx of [0.13, -0.1]) {
-    const boot = new THREE.Mesh(new THREE.CapsuleGeometry(0.055, 0.16, 4, 8), MATERIALS.leather);
-    boot.position.set(sx, 0.05, 1.4);
-    boot.rotation.set(Math.PI / 2, 0, sx * 2);
-    boot.castShadow = true;
-    g.add(boot);
-  }
+  // lying along -Z, head inland, face down: a sculpted body, with the wide sleeve of the
+  // reaching arm laid over where it meets the hand
+  const figure = makeCorpse();
+  figure.position.set(0.02, 0, 1.0);
+  g.add(figure);
+  drape([0.11, 0.07, 0.2], [0.63, 0.02, -1.0], 5, [0, -0.5, 0]);
 
   const wrist = new THREE.Vector3(0.7, 0.05, -1.12);
   if (handModel) {

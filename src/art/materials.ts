@@ -368,5 +368,5 @@ export async function loadTextures(base: string, anisotropy: number): Promise<vo
   apply(MATERIALS.rock, rock, 0xb9b4b0);
   apply(MATERIALS.wood, wood, 0xc9b8a6);
   apply(MATERIALS.woodDark, wood, 0x7c6a5c);
-  apply(MATERIALS.conjuredStone, rock, 0xd8cdbe);
+  apply(MATERIALS.conjuredStone, rock, 0xa89f93);
 }

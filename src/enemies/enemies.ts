@@ -82,7 +82,10 @@ export class Enemy {
   hurt(amount: number, game: Game, kind: 'hit' | 'burn' | 'fall' = 'hit') {
     if (!this.alive || amount <= 0) return;
     this.hp -= amount;
-    if (kind !== 'burn') this.flashT = 0.18;
+    if (kind !== 'burn') {
+      this.flashT = 0.18;
+      game.sound.creature('hit', this.position);
+    }
     if (kind === 'burn') {
       this.burnShown += amount;
       if (this.burnShown >= 6) {
@@ -127,6 +130,7 @@ export class Enemy {
     this.alive = false;
     this.hp = 0;
     this.setState('dead');
+    game.sound.creature('die', this.position);
     game.fx.gloamPuff(this.chest, 1.2);
     game.onEnemyDeath(this);
   }
@@ -182,6 +186,8 @@ export class Enemy {
     // decide
     let wishX = 0, wishZ = 0;
     const canAct = this.onGround && !this.knocked && this.stagger <= 0;
+    // now and then one of them makes the only sound it has left
+    if (canAct && Math.random() < dt * 0.09) game.sound.creature('groan', this.position);
     if (this.state === 'rise') {
       this.stateT += dt / 1.1;
       if (this.stateT >= 1) this.setState('hunt');
@@ -340,6 +346,7 @@ export class Enemy {
         this.stateT += dt / 0.45;
         if (this.stateT >= 1) {
           this.setState('strike');
+          game.sound.creature('strike', this.position);
           if (d < 2.5 && Math.abs(dy) < 1.8) {
             pl.damage(16);
             pl.impulse(_p.set((dx / (d || 1)) * 4, 1.5, (dz / (d || 1)) * 4));
@@ -410,6 +417,7 @@ export class Enemy {
           this.setState('strike');
           const from = this.model.muzzle.getWorldPosition(new THREE.Vector3());
           game.enemies.spit(from, pl);
+          game.sound.creature('spit', this.position);
           this.cooldown = 2.4 + Math.random() * 1.2;
         }
         return [0, 0];
@@ -455,6 +463,7 @@ export class Enemies {
     const g = this.game.world.groundBelow(_p.set(pos.x, pos.y + 2, pos.z), 20);
     if (g) pos.y = g.point.y;
     const e = new Enemy(kind, pos, this.seed++);
+    this.game.sound.creature('rise', pos);
     const pl = this.game.player.position;
     e.yaw = Math.atan2(pl.x - pos.x, pl.z - pos.z);
     this.game.world.scene.add(e.model.root);

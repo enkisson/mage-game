@@ -20,6 +20,7 @@ import { Caster } from '../magic/caster';
 import { SIGILS, type SigilId } from '../magic/sigils';
 import { Effects, FX_COLORS } from '../fx/effects';
 import { seaUniforms } from '../art/materials';
+import { Sound } from '../audio/sound';
 import { Hud } from '../ui/hud';
 import { createSky, loadPhotoSky, type NightSky } from './sky';
 import { GroundingPass } from './grounding';
@@ -82,6 +83,8 @@ export class Game {
   private reading: JournalDef | null = null;
   private seaClock = 0;
   private mistClock = 0;
+  readonly sound = new Sound();
+  private stride = 0;
   /** How far the night has fallen, 0 to 1. It comes on as you go north, and with time. */
   private night = 0;
   private nightHeld = false;
@@ -159,11 +162,17 @@ export class Game {
     this.composer.addPass(this.bloom);
     this.composer.addPass(new OutputPass());
 
+    // sound can only begin once the player has clicked or pressed something
+    const wake = () => this.sound.wake();
+    window.addEventListener('pointerdown', wake, true);
+    window.addEventListener('keydown', wake, true);
     this.fx.onBlast = (at, power) => {
+      this.sound.blast(at, power);
       const d = at.distanceTo(this.player.eye);
       this.view.rumble(Math.min(0.7, (power * 1.6) / (1 + d * d * 0.08)));
     };
     this.player.onHurt = (amount) => {
+      this.sound.hurt(amount);
       this.hud.hurt();
       this.view.hurt(amount);
     };
@@ -251,6 +260,7 @@ export class Game {
   }
 
   private die() {
+    this.sound.death();
     this.mode = 'dead';
     this.deadClock = 0;
     this.caster.reset();
@@ -289,6 +299,8 @@ export class Game {
   // ---- journals ----------------------------------------------------------------------------
 
   private read(def: JournalDef) {
+    this.sound.page();
+    if (def.teaches && !this.knowledge.sigils.includes(def.teaches)) this.sound.discovery();
     let learned: { id: SigilId; slot: number } | null = null;
     if (def.teaches) {
       const slot = learnSigil(this.knowledge, def.teaches);
@@ -332,6 +344,7 @@ export class Game {
 
   private startWave(st: StandRun) {
     st.phase = 'fighting';
+    this.sound.seal();
     st.clock = 0;
     st.queue = st.def.waves[st.wave].map((g) => ({ ...g, count: g.count + (g.kind === 'drowned' ? st.tide : Math.floor(st.tide / 2)) }));
     this.hud.banner(st.wave === 0 ? 'The way is sealed' : `The tide returns`, `${st.def.name} · tide ${st.wave + 1} of ${st.def.waves.length}`, 2.6);
@@ -361,6 +374,7 @@ export class Game {
         st.clock = 0;
         if (st.wave >= total) {
           st.phase = 'won';
+          this.sound.release();
           for (const s of st.seals) this.setSeal(s, false);
           this.knowledge.standsWon++;
           saveKnowledge(this.knowledge);
@@ -450,6 +464,8 @@ export class Game {
       } else if (code === 'KeyE') {
         if (this.nearJournal) this.read(this.nearJournal);
         else if (this.atExit) this.recall(this.stands[0]);
+      } else if (code === 'KeyM') {
+        this.hud.whisper(this.sound.toggleMute() ? 'Sound off' : 'Sound on');
       } else if (code === 'KeyO') {
         this.setEffects(this.effects === 'full' ? 'light' : 'full');
         this.hud.whisper(this.effects === 'full' ? 'Effects: full' : 'Effects: light');
@@ -469,6 +485,18 @@ export class Game {
     const playing = this.mode === 'playing';
     this.player.update(dt, this.input, this.world, playing);
     this.nav.setTarget(this.player.position.x, this.player.position.z);
+    // footfalls: sand, or the planks of the deck
+    if (this.player.landed > 3) this.sound.land(this.player.landed);
+    if (this.player.onGround && playing) {
+      const speed = Math.hypot(this.player.velocity.x, this.player.velocity.z);
+      this.stride += speed * dt;
+      if (this.stride > 1.75) {
+        this.stride = 0;
+        const deck = this.level.landmarks.deck;
+        const wood = !!deck && this.player.position.y > deck.y - 0.6 && Math.hypot(this.player.position.x - deck.x, this.player.position.z - deck.z) < 13;
+        this.sound.step(wood, Math.min(1, 0.5 + speed / 12));
+      }
+    }
     this.caster.update(dt);
     this.spells.update(dt);
     this.enemies.update(dt);
@@ -571,6 +599,13 @@ export class Game {
     this.view.update(dt, this.player, this.caster.sentence.length > 0);
     this.fx.update(this.mode === 'playing' || this.mode === 'dead' ? dt : 0);
     this.level.update?.(this.time, dt);
+    {
+      const p = this.player.position;
+      const shore = THREE.MathUtils.clamp(1 - (30 - p.z) / 85, 0.1, 1);
+      const height = THREE.MathUtils.clamp((p.y - 1) / 8, 0, 1) * 0.6 + this.night * 0.4;
+      const live = this.mode === 'playing' || this.mode === 'dead';
+      this.sound.update(dt, cam.position, this.player.yaw, live ? shore : shore * 0.5, height, live && this.caster.sentence.length ? 1 : 0);
+    }
     this.sky.setNight(this.night);
     seaUniforms.uNight.value = this.night;
     this.renderer.toneMappingExposure = THREE.MathUtils.lerp(1.05, 1.2, this.night);

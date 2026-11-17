@@ -30,6 +30,8 @@ interface Build {
   cap: boolean;
   /** Which forearm the sleeve has been torn from: 1, -1, or 0 for neither. */
   bare: number;
+  /** A long robe and a hood, instead of a sailor's coat and breeches. */
+  robe?: boolean;
 }
 
 const ARM_DIR: V3 = [0.42, -0.905, 0.05];
@@ -61,6 +63,12 @@ function crew(b: Build): Figure {
     { a: [0.039, 1.672, 0.108], b: [0.039, 1.672, 0.12], ra: 0.021, rb: 0.021, wear: 0, cut: true },
     { a: [-0.024, 1.598, 0.105], b: [0.024, 1.598, 0.105], ra: 0.013, rb: 0.013, wear: 0, cut: true },
   ];
+  if (b.robe) {
+    // skirts to the ankle, a hood thrown forward over the head
+    lumps.push({ a: [0, 0.95, 0], b: [0, 0.2, 0], ra: 0.17, rb: 0.25, flat: [1, 1, 0.62], wear: 2, blend: 0.05 });
+    lumps.push({ a: [0, 1.7, -0.03], b: [0, 1.6, -0.06], ra: 0.125, rb: 0.115, flat: [0.95, 1, 1.05], wear: 2, blend: 0.03 });
+    lumps.push({ a: [0, 1.52, -0.05], b: [0, 1.42, -0.07], ra: 0.11, rb: 0.13, flat: [1.3, 1, 0.8], wear: 2, blend: 0.05 });
+  }
   if (b.cap) lumps.push({ a: [0, 1.745, -0.005], b: [0, 1.76, -0.02], ra: 0.102, rb: 0.085, flat: [0.93, 0.7, 1.04], wear: 2, blend: 0.012 });
 
   for (const side of [1, -1]) {
@@ -511,6 +519,44 @@ export function makeDrowned(seed: number): CreatureModel {
 /** THE BLOATED: weeks in the water, swollen with it. It heaves brine at you from range. */
 export function makeSpitter(seed: number): CreatureModel {
   return makeCrew(seed, BLOATED, GARB[Math.abs(Math.round(seed)) % GARB.length], 1.08, true);
+}
+
+/**
+ * The dead mage on the shore: robed, face down, one arm thrown out toward his journal.
+ * Lies with his feet at the origin and his head toward -Z.
+ */
+export function makeCorpse(): THREE.Group {
+  const figure = sculpt(crew({ belly: 0, bulk: 0.98, cap: false, bare: 0, robe: true }));
+  const robe = { shirt: 0x3a4258, coat: 0x2b3145, breeches: 0x2b3145, flesh: 0x8a9088 };
+  const mesh = new THREE.SkinnedMesh(figure.geometry, crewMaterial(robe, 5));
+  const { root, bones, skeleton } = figure.rig();
+  mesh.add(root);
+  mesh.bind(skeleton);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  mesh.frustumCulled = false;
+  // as he fell: one arm reaching past his head, the other under him, the head turned aside
+  bones.armR.rotation.set(-0.25, 0, -2.25);
+  bones.foreR.rotation.set(0, 0, 0.35);
+  bones.armL.rotation.set(0.2, 0, 0.5);
+  bones.foreL.rotation.set(-0.3, 0, -1.2);
+  bones.neck.rotation.set(0.1, 0.5, 0);
+  bones.head.rotation.set(0.15, 0.55, 0.1);
+  bones.spine.rotation.set(-0.06, 0, 0.08);
+  bones.legL.rotation.set(0, 0, 0.1);
+  bones.legR.rotation.set(-0.05, 0, -0.14);
+  bones.shinR.rotation.set(0.3, 0, 0);
+  bones.footL.rotation.set(0.9, 0, 0);
+  bones.footR.rotation.set(0.9, 0, 0.3);
+  const lying = new THREE.Group();
+  lying.rotation.x = Math.PI / 2;
+  lying.position.y = 0.13;
+  lying.add(mesh);
+  const g = new THREE.Group();
+  g.rotation.y = Math.PI;
+  g.add(lying);
+  g.traverse((o) => { o.userData.noCollide = true; });
+  return g;
 }
 
 /** Sculpt every body now, so the first tide does not hitch. */

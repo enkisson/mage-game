@@ -47,6 +47,7 @@ export class Caster {
     this.busy = SPEAK_TIME;
     this.sinceSpoke = 0;
     game.view.speak(id, this.sentence.length - 1);
+    game.sound.speak(id, this.sentence.length > 1);
     game.hud.setSentence(this.sentence, this.pending, this.pending ? this.known(this.pending) : false);
   }
 
@@ -54,6 +55,7 @@ export class Caster {
     if (!this.sentence.length) return;
     this.sentence.length = 0;
     this.game.view.release(false);
+    this.game.sound.drop();
     this.game.hud.setSentence(this.sentence, null, false);
   }
 
@@ -99,11 +101,13 @@ export class Caster {
     }
     game.player.spendFocus(spell.cost);
     game.view.strike(spell);
+    game.sound.cast(spell);
     if (spell.cost >= 35) game.hitStop(0.045);
     if (!this.known(spell)) {
       game.knowledge.sentences.push(spell.key);
       saveKnowledge(game.knowledge);
       game.hud.discovery(spell);
+      game.sound.discovery();
     } else {
       game.hud.named(spell);
     }
