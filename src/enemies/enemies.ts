@@ -50,6 +50,9 @@ export class Enemy {
   private flashT = 0;
   private cooldown = 0.6 + Math.random() * 0.8;
   private leapCooldown = 2 + Math.random() * 2;
+  /** Where it was when last it made headway, and how long it has made none. */
+  private stuckAt = new THREE.Vector3(1e9, 0, 0);
+  private stuckT = 0;
   private wanderYaw = Math.random() * 6.28;
   private burnTime = 0;
   private burnDps = 0;
@@ -328,10 +331,19 @@ export class Enemy {
         }
         const routed = game.nav.reachable(p.x, p.z);
         const detour = game.nav.cost(p.x, p.z);
-        if (this.leapCooldown <= 0 && d < 5.5 && dy > 0.9 && dy < 2.9 && (!routed || detour > d * 3 + 12)
-          && game.world.clearLine(this.chest, pl.eye)) {
+        // making no headway: the way the map says is open is not (a step a hair too high)
+        if (p.distanceTo(this.stuckAt) > 0.4) { this.stuckAt.copy(p); this.stuckT = 0; } else this.stuckT += dt;
+        const stuck = this.stuckT > 2 && dy > 0.4;
+        if (this.leapCooldown <= 0 && d < 5.5 && dy > (stuck ? 0.4 : 0.9) && dy < 2.9 && (stuck || !routed || detour > d * 3 + 12)
+          && (stuck || game.world.clearLine(this.chest, pl.eye))) {
+          this.stuckT = 0;
           this.setState('crouch');
           return [0, 0];
+        }
+        // still stuck, and nowhere to leap: wander off a little and come at it again from elsewhere
+        if (this.stuckT > 3) {
+          if (this.stuckT > 4.8) { this.stuckT = 0; this.way.age = 99; }
+          return this.wander(dt);
         }
         if (this.route(dt, game, _dir)) {
           this.face(p.x + _dir.x, p.z + _dir.z, dt, 7);
