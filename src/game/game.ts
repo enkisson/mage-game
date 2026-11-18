@@ -26,7 +26,6 @@ import { GroundingPass } from './grounding';
 import { ScenePass } from './scenepass';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { FXAAShader } from 'three/examples/jsm/shaders/FXAAShader.js';
-import type { Models } from '../art/models';
 import { emptyKnowledge, learnSigil, loadKnowledge, saveKnowledge, type Knowledge } from './save';
 import { GESTURES, HOLD, IDLE, type GestureName } from '../player/poses';
 import type { ArmPose } from '../player/hands';
@@ -135,7 +134,7 @@ export class Game {
   /** Resolves once the hand models are in. */
   handsReady: Promise<boolean> = Promise.resolve(false);
 
-  constructor(private container: HTMLElement, models: Models, level: Level) {
+  constructor(private container: HTMLElement, level: Level) {
     this.renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1));
     this.renderer.shadowMap.enabled = true;
@@ -156,7 +155,6 @@ export class Game {
     this.fx = new Effects(scene);
 
     // the level
-    void models;
     this.level = level;
     scene.add(this.level.root);
     this.world.waterLevel = this.level.waterLevel;

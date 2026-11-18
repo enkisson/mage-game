@@ -517,7 +517,9 @@ export function buildRuins(opts: { rock: TextureSet }): { group: THREE.Group; ma
     const A = ROAD.pieces[i - 1].pts, last = A[A.length - 1], prev = A[A.length - 4];
     const tl = Math.hypot(last.x - prev.x, last.z - prev.z), tx = (last.x - prev.x) / tl, tz = (last.z - prev.z) / tl;
     const r = k === 1 ? 2.5 : 2.7;
-    const c = clearRoad([last.x + tx * (ROAD_HALF + 0.8 + 3.2 + r) + last.nx * 0.5, last.z + tz * (ROAD_HALF + 0.8 + 3.2 + r) + last.nz * 0.5], 3.2 + r + 0.4);
+    // how far the turret reaches from its centre: the square one to its corners and battered foot
+    const reach = k === 1 ? 4.3 : r + 0.3;
+    const c = clearRoad([last.x + tx * (ROAD_HALF + 0.8 + 3.2 + reach) + last.nx * 0.5, last.z + tz * (ROAD_HALF + 0.8 + 3.2 + reach) + last.nz * 0.5], 3.2 + reach + 0.6);
     const deck = last.y, bottom = Math.max(deck - 14, Math.min(deck - 6, groundHeight(c[0], c[1]) - 1.5));
     if (k === 1) sqTower(c[0], c[1], Math.atan2(-tz, tx), 5, 5, deck, 7.5, { ext: [0.5, 0.5, 0.5, 0.5], bottom, ground: () => deck - 0.5, drop: (lx, lz) => 0.7 * sstep(4, 0.5, Math.hypot(lx - 2.5, lz + 2.5)), T: 1.3 });
     else turret(c[0], c[1], r, deck, k === 0 ? 8 : 9, bottom, { roof: k === 0, broken: k === 2 });

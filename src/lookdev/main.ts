@@ -123,6 +123,7 @@ const SHOTS: Record<string, Shot> = {
   fortress: { pos: [175, 22, 135], look: [140, 62, -60], fov: 55, exposure: 1.0 },
   // at the top of the road, at the gate
   gate: { pos: [146, 61.5, -58.5], look: [162, 64, -50], fov: 62, exposure: 1.0 },
+  turnplan: { pos: [126, 62, -28], look: [114, 24, -48], fov: 50, exposure: 1.0 },
   fallfoot: { pos: [-27, 1.7, -24], look: [-38, 12, -50], fov: 55, exposure: 1.0 },
 };
 

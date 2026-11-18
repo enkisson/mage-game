@@ -326,7 +326,12 @@ export function columnField(): THREE.BufferGeometry {
     // the road: columns cut off flush under its paving, or built up to it
     const road = roadAt(x, z);
     if (road.bed !== null) {
-      prism(poly, Math.min(g, gOut) - 3, road.bed - 0.25, () => [0, 0], { land, contact: -1e3, ox: ft.nx, oz: ft.nz, canyon, bow: 0, under: false, top: true, flat: true });
+      // flush with the paving, so there is no slot between the road and the wall to catch a foot;
+      // where the road climbs, cut to the lowest point of the road under the column's top, so no
+      // edge of it stands up through the paving as a step
+      let bed = road.bed;
+      for (const [vx, vz] of poly) { const b = roadAt(vx, vz).bed; if (b !== null) bed = Math.min(bed, b); }
+      prism(poly, Math.min(g, gOut) - 3, bed + 0.02, () => [0, 0], { land, contact: -1e3, ox: ft.nx, oz: ft.nz, canyon, bow: 0, under: false, top: true, flat: true });
       continue;
     }
 

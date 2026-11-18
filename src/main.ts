@@ -1,6 +1,5 @@
 import './ui/hud.css';
 import { Game } from './game/game';
-import { loadModels } from './art/models';
 import { loadTextures } from './art/materials';
 import { patchFog } from './world/coast/atmosphere';
 import { buildWreckShore } from './world/wreckshore';
@@ -19,13 +18,12 @@ const assets = import.meta.env.BASE_URL + 'assets/';
 patchFog();
 const parts = [0, 0];
 const show = () => { meter.style.width = `${Math.round(((parts[0] + parts[1]) / 2) * 100)}%`; };
-const [models] = await Promise.all([
-  loadModels(assets + 'models/', 8, (done, total) => { parts[0] = done / total; show(); }),
-  loadTextures(assets, 8),
+const [, level] = await Promise.all([
+  loadTextures(assets, 8).then(() => { parts[0] = 1; show(); }),
+  buildWreckShore(assets, (done, total) => { parts[1] = done / total; show(); }),
 ]);
-const level = await buildWreckShore(assets, (done, total) => { parts[1] = done / total; show(); });
 
-const game = new Game(container, models, level);
+const game = new Game(container, level);
 await game.handsReady;
 loading.remove();
 game.run();

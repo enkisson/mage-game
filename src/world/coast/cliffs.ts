@@ -160,7 +160,7 @@ export function arch(): THREE.BufferGeometry {
  * A cluster of basalt columns: six-sided prisms packed edge to edge, their tops broken off at
  * different heights so they step down like a giant's stair.
  */
-export function columns(cx: number, cz: number, radius: number, height: (x: number, z: number) => number, seed = 1, a = 1.05): THREE.BufferGeometry {
+export function columns(cx: number, cz: number, radius: number, height: (x: number, z: number) => number, seed = 1, a = 1.05, flat = false): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = [];
   const R = a / Math.sqrt(3);
   for (let row = -Math.ceil(radius / (a * 0.866)); row <= Math.ceil(radius / (a * 0.866)); row++) {
@@ -175,7 +175,8 @@ export function columns(cx: number, cz: number, radius: number, height: (x: numb
       g.rotateY(Math.PI / 6 + (hash(x, z) - 0.5) * 0.05);
       // a broken, tilted top
       const pp = g.attributes.position;
-      for (let i = 0; i < pp.count; i++) if (pp.getY(i) > 0) pp.setY(i, pp.getY(i) + (hash(x + i, z + seed) - 0.5) * 0.25 + (pp.getX(i) * (hash(x, seed) - 0.5) + pp.getZ(i) * (hash(z, seed) - 0.5)) * 0.4);
+      // (or worn flat, where they are to be walked on)
+      if (!flat) for (let i = 0; i < pp.count; i++) if (pp.getY(i) > 0) pp.setY(i, pp.getY(i) + (hash(x + i, z + seed) - 0.5) * 0.25 + (pp.getX(i) * (hash(x, seed) - 0.5) + pp.getZ(i) * (hash(z, seed) - 0.5)) * 0.4);
       g.translate(x, (top + base) / 2, z);
       parts.push(g.toNonIndexed());
     }

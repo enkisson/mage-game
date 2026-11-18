@@ -26,12 +26,17 @@ export const PLAYER = {
   focusRegen: 18,
   focusDelay: 1.0,
   substeps: 3,
+  /** The highest edge you walk up without jumping: a kerb, a step, the top of a broken column. */
+  stepUp: 0.45,
 };
 
 const _a = new THREE.Vector3();
 const _b = new THREE.Vector3();
 const _wish = new THREE.Vector3();
 const _n = new THREE.Vector3();
+const _prev = new THREE.Vector3();
+const _sa = new THREE.Vector3();
+const _sb = new THREE.Vector3();
 
 export class Player {
   /** Feet. */
@@ -210,12 +215,35 @@ export class Player {
 
       v.y -= PLAYER.gravity * h;
       const fallSpeed = -v.y;
+      _prev.copy(this.position);
       this.position.addScaledVector(v, h);
 
       _a.set(this.position.x, this.position.y + PLAYER.radius, this.position.z);
       _b.set(this.position.x, this.position.y + PLAYER.height - PLAYER.radius, this.position.z);
       const res = world.resolveCapsule(_a, _b, PLAYER.radius);
       this.position.set(_a.x, _a.y - PLAYER.radius, _a.z);
+
+      // Walking into a low edge: try the same step from a little higher, and set down on top of
+      // it, if there is walkable ground there and it gets you further than the edge allowed.
+      if (this.onGround && this.dodgeLeft <= 0 && res.hit) {
+        const wantX = v.x * h, wantZ = v.z * h, want = Math.hypot(wantX, wantZ);
+        // progress in the direction you meant to go (sliding along the edge does not count)
+        const got = want > 1e-4 ? ((this.position.x - _prev.x) * wantX + (this.position.z - _prev.z) * wantZ) / want : 0;
+        if (want > 1e-4 && got < want * 0.6) {
+          _sa.set(_prev.x + wantX, _prev.y + PLAYER.stepUp + PLAYER.radius, _prev.z + wantZ);
+          _sb.set(_sa.x, _prev.y + PLAYER.stepUp + PLAYER.height - PLAYER.radius, _sa.z);
+          world.resolveCapsule(_sa, _sb, PLAYER.radius);
+          const stepped = ((_sa.x - _prev.x) * wantX + (_sa.z - _prev.z) * wantZ) / want;
+          if (stepped > got + want * 0.3) {
+            _n.set(_sa.x, _sa.y - PLAYER.radius, _sa.z);
+            const below = world.groundBelow(_n, PLAYER.stepUp + 0.1);
+            if (below && below.normal.y > 0.7 && below.point.y > _prev.y - 0.05) {
+              this.position.set(_n.x, below.point.y, _n.z);
+              res.groundY = 1;
+            }
+          }
+        }
+      }
 
       const grounded = res.hit && res.groundY > 0.7;
       if (grounded) {

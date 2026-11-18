@@ -79,18 +79,20 @@ const CHECKS = {
     st.phase = 'won';
     for (const s of st.seals) if (s.collider) { g.world.removeCollider(s.collider); s.collider = null; }
     const L = g.level.landmarks;
-    const ways = Object.keys(L).filter((k) => /^way\\d+$/.test(k)).sort((a, b) => +a.slice(3) - +b.slice(3)).map((k) => L[k]);
-    g.debug.teleport(ways[0].x - 2, ways[0].z + 1); g.debug.advance(0.5);
+    const ways = Object.keys(L).filter((k) => /^path\\d+$/.test(k)).sort((a, b) => +a.slice(4) - +b.slice(4)).map((k) => L[k]);
+    // from the sand just short of the causeway's foot, in line with it
+    const back = ways[0].clone().sub(ways[1]).setY(0).normalize().multiplyScalar(2);
+    g.debug.teleport(ways[0].x + back.x, ways[0].z + back.z); g.debug.advance(0.5);
     let t = 0, stuck = -1;
     for (let i = 1; i < ways.length; i++) {
       const w = ways[i];
       let leg = 0;
-      while (leg < 30 && Math.hypot(g.player.position.x - w.x, g.player.position.z - w.z) > 1.2) {
+      while (leg < 12 && Math.hypot(g.player.position.x - w.x, g.player.position.z - w.z) > 1.0) {
         g.debug.lookAt(w.x, g.player.position.y + 1.6, w.z);
         g.input.hold('KeyW', true); g.debug.advance(0.1); leg += 0.1;
       }
       t += leg;
-      if (leg >= 30) { stuck = i; break; }
+      if (leg >= 12) { stuck = i; break; }
     }
     const gate = L.gate;
     let k = 0;
@@ -146,7 +148,9 @@ const CHECKS = {
     g.debug.start(); g.debug.learnAll();
     g.stands[0].phase = 'won';
     const L = g.level.landmarks;
-    g.debug.teleport(L.ledge.x, L.ledge.z); g.debug.advance(0.2);
+    // at the edge of it, where they can see you
+    const ex = L.ledge.x + (L.ledgeFoot.x - L.ledge.x) * 0.4, ez = L.ledge.z + (L.ledgeFoot.z - L.ledge.z) * 0.4;
+    g.debug.teleport(ex, ez); g.debug.advance(0.2);
     const ledge = g.player.position.y;
     const e = g.debug.spawn('drowned', L.ledgeFoot.x, L.ledgeFoot.z);
     const below = ledge - e.position.y;

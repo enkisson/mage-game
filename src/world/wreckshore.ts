@@ -134,8 +134,8 @@ export async function buildWreckShore(assets: string, progress?: (done: number, 
       // a spiral of shorter columns round it, rising a step at a time to the top: the long way up
       const t = ((Math.atan2(dz, dx) + Math.PI * 0.35) / (Math.PI * 2) + 1) % 1;
       return 0.45 + t * (O.h - 0.55);
-    }, 7, 1.15);
-    const ledge = columns(LEDGE.x, LEDGE.z, LEDGE.r, () => LEDGE.h, 8, 1.1);
+    }, 7, 1.15, true);
+    const ledge = columns(LEDGE.x, LEDGE.z, LEDGE.r, () => LEDGE.h, 8, 1.1, true);
     for (const geo of [outcrop, ledge]) {
       const m = new THREE.Mesh(geo, bay.columnar);
       m.castShadow = m.receiveShadow = true;
@@ -262,11 +262,13 @@ export async function buildWreckShore(assets: string, progress?: (done: number, 
     exit: (marks.exit ?? ROAD.end).clone(),
   };
   // the way up, as points to walk between: the foot of the causeway, then the end of each piece
+  // (way0..wayN the ends of the pieces; path0..pathN every few metres along the paving)
   ROAD.pieces.forEach((piece, i) => {
     if (i === 0) landmarks.way0 = new THREE.Vector3(piece.pts[0].x, piece.pts[0].y, piece.pts[0].z);
     const e = piece.pts[piece.pts.length - 1];
     landmarks[`way${i + 1}`] = new THREE.Vector3(e.x, e.y, e.z);
   });
+  ROAD.path.filter((_, i) => i % 4 === 0 || i === ROAD.path.length - 1).forEach((p, i) => { landmarks[`path${i}`] = new THREE.Vector3(p.x, p.y, p.z); });
 
   return {
     id: 'wreck-shore',

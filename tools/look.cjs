@@ -18,6 +18,11 @@ const SCENARIOS = {
   cnoao: `g.debug.start(); g.grounding.enabled = false; g.debug.teleport(10, 12); g.debug.advance(0.3); g.debug.lookAt(-160, 22, 130);`,
   cnobloom: `g.debug.start(); g.bloom.enabled = false; g.debug.teleport(10, 12); g.debug.advance(0.3); g.debug.lookAt(-160, 22, 130);`,
   cnofog: `g.debug.start(); g.sky.setNight = () => {}; g.world.scene.fog.density = 0.00001; g.debug.teleport(10, 12); g.debug.advance(0.3); g.debug.lookAt(-160, 22, 130);`,
+  turn1: `g.debug.start(); g.stands[0].phase = 'won'; for (const s of g.stands[0].seals) if (s.collider) { g.world.removeCollider(s.collider); s.collider = null; }
+    const a = g.level.landmarks.way2, b = g.level.landmarks.way3; g.debug.teleport(a.x + 4, a.z + 1.2); g.debug.advance(0.3); g.debug.lookAt(b.x, b.y + 1.5, b.z);`,
+  causeway: `g.debug.start(); const a = g.level.landmarks.way0, b = g.level.landmarks.way1; g.debug.teleport(a.x + 3, a.z + 2.5); g.debug.advance(0.3); g.debug.lookAt(b.x, b.y, b.z);`,
+  turn2: `g.debug.start(); g.stands[0].phase = 'won'; for (const s of g.stands[0].seals) if (s.collider) { g.world.removeCollider(s.collider); s.collider = null; }
+    const a = g.level.landmarks.path33, b = g.level.landmarks.path36; g.debug.teleport(a.x, a.z); g.debug.advance(0.3); g.debug.lookAt(b.x, b.y + 1.5, b.z);`,
   cbeach: `g.debug.start(); g.debug.teleport(95, 2); g.debug.advance(0.3); g.debug.lookAt(-150, 20, 70);`,
   croad: `g.debug.start(); g.debug.teleport(128, 6); g.debug.advance(0.3); g.debug.lookAt(150, 30, -40);`,
   stand: `g.debug.start(); g.debug.learnAll(); g.debug.teleport(104, 4); g.debug.advance(0.3); g.debug.lookAt(140, 6, -20);`,

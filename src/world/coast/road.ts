@@ -62,7 +62,7 @@ export const ROAD: { pieces: RoadPiece[]; path: RoadPoint[]; start: THREE.Vector
   const endY = plateauAt(endP.x, endP.z) + 0.2;
   const raw: { kind: 'leg' | 'turn'; sd: [number, number][] }[] = [];
   // the approach: a causeway of broken columns climbing from the open beach at the bay's east
-  // end, over the cliff's last stumps, to where the first leg starts (about one in three)
+  // end, over the cliff's last stumps, to where the first leg starts
   const A = { x: 195, z: -2 };
   LEGS.forEach((l, k) => {
     const sd: [number, number][] = [];
@@ -79,7 +79,8 @@ export const ROAD: { pieces: RoadPiece[]; path: RoadPoint[]; start: THREE.Vector
     }
   });
   // the length of each piece, for the climb
-  const beachY = groundHeight(A.x, A.z) + 0.2;
+  // it starts just under the sand, so it rises out of the beach with no lip to trip on
+  const beachY = groundHeight(A.x, A.z) - 0.12;
   const lengths = raw.map((p) => p.sd.reduce((acc, v, i) => (i ? acc + Math.hypot(v[0] - p.sd[i - 1][0], v[1] - p.sd[i - 1][1]) : 0), 0));
   const total = lengths.reduce((a, b) => a + b, 0);
   let run = 0;
@@ -103,7 +104,9 @@ export const ROAD: { pieces: RoadPiece[]; path: RoadPoint[]; start: THREE.Vector
       const t = i / N;
       // eased into the leg at the top, so the turn onto it is smooth
       const u = t < 0.8 ? t / 0.8 * 0.85 : 0.85 + (t - 0.8) / 0.2 * 0.15;
-      pts.push({ x: A.x + (b.x - A.x) * u, z: A.z + (b.z - A.z) * u, y: beachY + (startY - beachY) * t, nx: b.nx, nz: b.nz });
+      // it climbs over the open beach, about one in two and a half, so it clears the bank of
+      // scree at the cliff's end, and runs on level onto the first leg
+      pts.push({ x: A.x + (b.x - A.x) * u, z: A.z + (b.z - A.z) * u, y: beachY + (startY - beachY) * Math.min(1, t / 0.7), nx: b.nx, nz: b.nz });
     }
     pieces.unshift({ kind: 'turn', pts });
   }
@@ -141,6 +144,10 @@ const BOX = (() => {
 export function roadAt(x: number, z: number): { bed: number | null; cap: number; near: boolean } {
   const out = { bed: null as number | null, cap: Infinity, near: false };
   if (x < BOX.minX || x > BOX.maxX || z < BOX.minZ || z > BOX.maxZ) return out;
+  // where two pieces' cuts overlap, the rock is cut to the paving of the nearer one: the one
+  // you are actually standing on there
+  let bedDist = Infinity;
+  const cut = (d: number, y: number) => { if (d < bedDist) { bedDist = d; out.bed = y; } };
   for (const piece of ROAD.pieces) {
     const pts = piece.pts;
     let best = 1e9, bo = 0, by = 0, bt = 0;
@@ -162,11 +169,12 @@ export function roadAt(x: number, z: number): { bed: number | null; cap: number;
     const half = ROAD_HALF + PARAPET;
     if (best < half + 3.5) out.near = true;
     if (piece.kind !== 'leg') {
-      if (best < half + 0.4) out.bed = Math.max(out.bed ?? -Infinity, by);
+      // the turns are cut wide, so the inside corner is open and nothing catches you rounding it
+      if (best < half + 1.4) cut(best, by);
       continue;
     }
     if (!inSpan) continue;
-    if (Math.abs(bo) < half) out.bed = Math.max(out.bed ?? -Infinity, by);
+    if (Math.abs(bo) < half) cut(best, by);
     else if (bo >= half) out.cap = Math.min(out.cap, by - 0.6);
   }
   return out;
@@ -267,7 +275,8 @@ export function roadParapet(): THREE.BufferGeometry {
 
 /** Old dressed stone: flags and blocks of dark basalt, worn, wet, the joints full of moss. */
 export function masonryMaterial(rock: TextureSet, paving: boolean): THREE.MeshStandardMaterial {
-  const m = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85, metalness: 0 });
+  // both sides: the turns are laid the other way round from the legs
+  const m = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85, metalness: 0, side: paving ? THREE.DoubleSide : THREE.FrontSide });
   const u = { rMap: { value: rock.diff } };
   m.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, u);
