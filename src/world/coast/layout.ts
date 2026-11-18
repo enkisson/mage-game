@@ -32,7 +32,7 @@ export const BAY = {
  * and out again, and east to where the cliffs fall away.
  */
 const RAW: [number, number][] = [
-  [-200, 46], [-160, 41], [-128, 44], [-102, 40], [-93, 26], [-90, 0], [-93, -28], [-87, -52],
+  [-285, 54], [-240, 50], [-200, 46], [-160, 41], [-128, 44], [-102, 40], [-93, 26], [-90, 0], [-93, -28], [-87, -52],
   [-50, -50], [-15, -55], [1, -54], [3, -80], [6, -116], [26, -121], [29, -90], [31, -54],
   [50, -50], [90, -48], [130, -38], [170, -20],
 ];
@@ -109,7 +109,7 @@ function buildSdf(): [Float32Array, Float32Array] {
     const x = SDF.minX + i * SDF.cell, z = SDF.minZ + j * SDF.cell;
     let d = outlineDistance(x, z);
     // beyond the line's two ends there is no cliff
-    if (x < -199 && z > 40) d = Math.min(d, -5);
+    if (x < -284 && z > 40) d = Math.min(d, -5);
     land[j * SDF_W + i] = d;
     // the rocks out in the sea: stacks, skerries, boulders
     let r = -1e3;

@@ -9,11 +9,13 @@ import { buildOcean, oceanUniforms } from './ocean';
 import { place, tatter, weather, buildPeak, buildTower, buildVortex, summitOf, type ModelSource } from './dressing';
 import { mistBank, glow, beam } from './airfx';
 import { marram } from './grass';
-import { arch, boulders, columns, rockMaterial, scatterNear, seaStack } from './cliffs';
-import { cliffFace, cliffMaterial, colonnade, columnMaterial, fallRecess } from './cliffface';
+import { boulders, rockMaterial, scatterNear, seaStack } from './cliffs';
+import { fallRecess } from './cliffface';
+import { columnField, columnFieldMaterial } from './columnfield';
 import { animateFalls, fallUniforms, waterfall } from './falls';
 import { buildBirds } from './birds';
 import { buildSeaRocks } from './searocks';
+import { buildCrash } from './crash';
 import { makeSeatedMage } from '../../art/mage';
 
 export interface Bay {
@@ -51,21 +53,11 @@ export async function buildBay(source: ModelSource, assets: string): Promise<Bay
   const basalt = rockMaterial(rockTex, { columnar: 0 });
   const columnar = rockMaterial(rockTex, { columnar: 1, moss: 0.8 });
   const solid = (geo: THREE.BufferGeometry, m: THREE.Material) => { const mesh = new THREE.Mesh(geo, m); mesh.castShadow = mesh.receiveShadow = true; root.add(mesh); return mesh; };
-  solid(cliffFace(), cliffMaterial(rockTex));
-  solid(colonnade(), columnMaterial(rockTex));
+  // the cliffs: a mass of basalt columns, with the arch and the caves built of them too
+  solid(columnField(), columnFieldMaterial(rockTex));
   solid(mergeGeometries(BAY.stacks.map((s, i) => seaStack(s.x, s.z, s.h, s.r, i + 1)))!, columnar);
-  solid(arch(), columnar);
   // rock and wreckage out in the sea: more stacks, an arch, the reef she struck, her bow on it
   root.add(buildSeaRocks({ basalt, columnar }));
-  // columns: the giant's stair at the headland's corner, and organ pipes along its sea face
-  const stair = (cx: number, cz: number, rad: number, tall: number, seed: number) => (x: number, z: number) => {
-    const d = rockDistance(x, z);
-    const near = Math.max(0, 1 + d / rad);
-    return Math.max(0, near * tall * (0.55 + 0.45 * hash(Math.round(x * 3), Math.round(z * 3) + seed)) + (hash(x, z) < 0.2 ? -3 : 0));
-  };
-  solid(columns(-98, 32, 13, stair(-98, 32, 13, 16, 1), 1), columnar);
-  solid(columns(-135, 47, 9, stair(-135, 47, 9, 22, 2), 2), columnar);
-  solid(columns(-60, -48, 7, stair(-60, -48, 7, 9, 3), 3, 1.2), columnar);
   // boulders: along the river, in the canyon, on the scree, and black and wet at the headland's foot
   const river: { x: number; z: number; r: number; sink?: number }[] = [];
   RIVERS.flat().forEach(([x, z], i) => {
@@ -213,6 +205,9 @@ export async function buildBay(source: ModelSource, assets: string): Promise<Bay
   }
 
   // ---- water: the falls, and the streams they feed ------------------------------------------------
+  // the storm waves bursting white against the rock
+  const crash = buildCrash();
+  root.add(crash.group);
   FALLS.forEach((f, k) => root.add(waterfall(f, { faceSetback: fallRecess(f), seed: k + 1 }).group));
   RIVERS.forEach((river, ri) => {
     const pts = river.map(([x, z]) => new THREE.Vector3(x, 0, z));
@@ -312,6 +307,7 @@ export async function buildBay(source: ModelSource, assets: string): Promise<Bay
       oceanUniforms.uTime.value = time;
       fallUniforms.uTime.value = time;
       animateFalls(time);
+      crash.update(time);
       birds.update(time);
     },
   };

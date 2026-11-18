@@ -89,8 +89,8 @@ async function bayReady(): Promise<THREE.Scene> {
 }
 
 const STORM = {
-  sunAzimuth: THREE.MathUtils.degToRad(255), sunElevation: THREE.MathUtils.degToRad(14), sunColor: 0xd8d2c8, sunIntensity: 1.5,
-  envIntensity: 1.9, fog: 0x7e858c, fogDensity: 0.0045, fogSun: 0xb8b0a6, at: new THREE.Vector3(-50, 0, 0), area: 360, brightness: 1.0, dark: 0.55,
+  sunAzimuth: THREE.MathUtils.degToRad(255), sunElevation: THREE.MathUtils.degToRad(14), sunColor: 0xdcc8b0, sunIntensity: 2.3,
+  envIntensity: 1.55, fog: 0x7e858c, fogDensity: 0.0045, fogSun: 0xb8b0a6, at: new THREE.Vector3(-50, 0, 0), area: 360, brightness: 1.0, dark: 0.55,
 };
 
 interface Shot { pos: [number, number, number]; look: [number, number, number]; fov: number; exposure: number; grade?: Grade }
@@ -111,6 +111,8 @@ const SHOTS: Record<string, Shot> = {
   wreck: { pos: [-48, 1.6, 30], look: [-72, 10, 14], fov: 55, exposure: 1.0 },
   // the sea, from the waterline
   sea: { pos: [-30, 1.6, 32], look: [-140, 10, 150], fov: 55, exposure: 1.0 },
+  // from the water, the way the painting sees it: the headland and the long wall over the bay
+  hero: { pos: [40, 13, 112], look: [-75, 30, -30], fov: 55, exposure: 1.0 },
   fallfoot: { pos: [-27, 1.7, -24], look: [-38, 12, -50], fov: 55, exposure: 1.0 },
 };
 
