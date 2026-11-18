@@ -126,7 +126,7 @@ export function buildGround(dry: TextureSet, damp: TextureSet, rock: TextureSet,
         gN = normalize(tx * nT.x + tz * nT.y + wn * nT.z);`)
       .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = gRough;')
       .replace('#include <normal_fragment_maps>', 'normal = normalize((viewMatrix * vec4(gN, 0.0)).xyz);')
-      .replace('#include <aomap_fragment>', '#include <aomap_fragment>\n reflectedLight.indirectSpecular *= mix(1.0, 0.55, gWet * (1.0 - gPuddle));');
+      .replace('#include <aomap_fragment>', '#include <aomap_fragment>\n reflectedLight.indirectSpecular *= mix(1.0, 0.55, gWet * (1.0 - gPuddle)) * mix(1.0, 0.7, gPuddle);');
   };
   const mesh = new THREE.Mesh(geo, m);
   mesh.receiveShadow = true;

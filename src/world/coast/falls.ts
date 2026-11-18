@@ -17,6 +17,29 @@ import { groundHeight, plateauAt, type Fall } from './layout';
 
 export const fallUniforms = { uTime: { value: 0 }, uLight: { value: 1 } };
 
+/** Every puff of spray, so it can billow: where it started, how far it rises, its own rhythm. */
+interface Puff { s: THREE.Sprite; base: THREE.Vector3; rise: number; drift: THREE.Vector3; period: number; phase: number; size: number; opacity: number; spin: number }
+const puffs: Puff[] = [];
+function billow(s: THREE.Sprite, rise: number, drift: THREE.Vector3, period: number) {
+  puffs.push({ s, base: s.position.clone(), rise, drift, period, phase: Math.random(), size: s.scale.x, opacity: (s.material as THREE.SpriteMaterial).opacity, spin: (Math.random() - 0.5) * 0.3 });
+}
+
+/**
+ * Keep the spray alive: each puff rises and drifts off on the wind, swelling and thinning as it
+ * goes, then is born again at the foot of the fall.
+ */
+export function animateFalls(time: number) {
+  for (const p of puffs) {
+    const k = (time / p.period + p.phase) % 1;
+    p.s.position.copy(p.base).addScaledVector(p.drift, k).setY(p.base.y + p.rise * k);
+    const grow = 1 + k * 0.6;
+    p.s.scale.set(p.size * grow, (p.size / 1.2) * grow, 1);
+    const m = p.s.material as THREE.SpriteMaterial;
+    m.opacity = Math.min(1, p.opacity * 1.4 * Math.min(1, k * 6) * (1 - k * k));
+    m.rotation += p.spin * 0.016;
+  }
+}
+
 const fogU = () => ({ ...THREE.UniformsLib.fog, fogSunDir: air.sunDir, fogSunColor: air.sunColor, fogFalloff: air.falloff, fogGlowPower: air.glowPower });
 
 const VERT = /* glsl */ `
@@ -72,14 +95,18 @@ void main() {
   // water accelerates as it falls, so the pattern runs faster lower down
   float run = sqrt(max(y, 0.0) * 19.6);
   float t = uTime;
-  // long vertical streaks, a hand to an arm wide
-  float streak = wf(vec2(x * 1.3 + uSeed * 7.0, y * 0.035 - t * 0.9 * (1.0 + v)));
-  float fine = wn(vec2(x * 5.0 + uSeed, y * 0.12 - t * 2.4));
-  // lower down it breaks into falling clumps
-  float clumps = wf(vec2(x * 0.9 + uSeed * 3.0, y * 0.22 - t * 2.0 * (0.5 + v)));
   float breakup = smoothstep(0.15, 0.95, v);
+  // long vertical streaks near the lip, a hand to an arm wide, shortening as the water falls
+  // and tears apart, until near the foot it is all clumps and fingers
+  float stretch = mix(0.035, 0.15, breakup);
+  vec2 sp = vec2(x * 1.3 + uSeed * 7.0, y * stretch - t * 0.9 * (1.0 + v));
+  float streak = wf(sp);
+  float fine = wn(vec2(x * 5.0 + uSeed, y * mix(0.12, 0.5, breakup) - t * 2.4));
+  float clumps = wf(vec2(x * 0.9 + uSeed * 3.0, y * 0.22 - t * 2.0 * (0.5 + v)));
   float dens = streak * 0.75 + fine * 0.25;
   dens = mix(dens, dens * (0.3 + clumps * 1.3), breakup);
+  // thickest down the middle, where most of the water is
+  dens += (1.0 - abs(u - 0.5) * 2.0) * 0.18 * (1.0 - breakup * 0.4);
   // broad slow bands of thicker and thinner water, so the body is not one even sheet
   dens *= 0.75 + 0.5 * wn(vec2(x * 0.18 + uSeed, y * 0.01 - t * 0.3));
   // ragged edges, worse further down
@@ -88,14 +115,22 @@ void main() {
   float a;
   vec3 c;
   if (uKind < 0.5) {
-    a = smoothstep(0.28 - breakup * 0.05, 0.62, dens) * edge;
+    a = smoothstep(0.24 - breakup * 0.05, 0.56, dens) * edge;
+    // at the foot the falling water is lost in its own spray: a solid white mass
+    a = max(a, smoothstep(0.78, 1.0, v) * 0.55 * edge);
     // the glassy tongue at the lip: dark and smooth, then whitening
     float tongue = 1.0 - smoothstep(0.0, 0.05, v);
-    vec3 white = vec3(0.86, 0.89, 0.9);
+    vec3 white = vec3(0.9, 0.92, 0.93);
     vec3 grey = vec3(0.42, 0.47, 0.5);
     c = mix(grey, white, smoothstep(0.35, 0.75, dens));
     c = mix(c, vec3(0.14, 0.17, 0.17) + vec3(0.25) * fine, tongue);
     a = mix(a, 0.85 * edge, tongue);
+  } else if (uKind > 3.5) {
+    // the boil at the foot: churned white water heaving up, ragged and puffing at its top
+    float f1 = wf(vec2(x * 0.5 + uSeed, y * 0.5 - t * 1.4));
+    float f2 = wf(vec2(x * 1.7 - t * 0.3, y * 1.7 - t * 2.2));
+    a = smoothstep(0.3, 0.6, f1 * 0.65 + f2 * 0.35 + v * 0.35 - 0.12);
+    c = mix(vec3(0.55, 0.6, 0.63), vec3(0.92, 0.94, 0.95), smoothstep(0.35, 0.7, f1 * 0.6 + f2 * 0.4));
   } else if (uKind > 2.5) {
     // a rope of water peeled off the sheet: solid and white near the top, breaking into beads
     a = smoothstep(0.2 + breakup * 0.25, 0.55, dens) * edge * (1.0 - breakup * 0.35);
@@ -116,7 +151,7 @@ void main() {
   vec3 N = normalize(vWn);
   if (dot(N, V) < 0.0) N = -N;
   vec3 sideAx = normalize(cross(vec3(0.0, 1.0, 0.0), N) + vec3(1e-4, 0.0, 0.0));
-  float sd = wn(vec2(x * 1.3 + uSeed * 7.0 + 0.05, y * 0.035 - t * 0.9 * (1.0 + v))) - streak;
+  float sd = wf(sp + vec2(0.06, 0.0)) - streak;
   N = normalize(N + sideAx * sd * 6.0 * (abs(uKind - 2.0) > 0.5 ? 1.0 : 0.0));
   #ifdef USE_FOG
     vec3 lit = waterLight(N, fogSunDir, fogSunColor);
@@ -130,7 +165,7 @@ void main() {
   c *= 1.0 - graze * 0.15;
   c *= uLight;
   // the last metres vanish into the spray
-  a *= smoothstep(1.0, 0.9, v) * uOpacity;
+  a *= smoothstep(1.0, uKind > 3.5 ? 0.9 : 0.96, v) * uOpacity;
   gl_FragColor = vec4(c, a);
 #include <fog_fragment>
 }`,
@@ -158,10 +193,13 @@ void main() {
   float ang = atan(p.y - uImpact.y, p.x - uImpact.x);
   // foam boiling out in rings from where the water lands
   float boil = wf(vec2(ang * 2.0, d * 6.0 - uTime * 0.8)) * 0.6 + wf(p * 0.9 + uTime * 0.3) * 0.4;
-  float foam = smoothstep(0.42, 0.7, boil + (1.0 - d) * 0.45) * smoothstep(1.0, 0.55, d);
+  float foam = smoothstep(0.5, 0.78, boil + (1.0 - d) * 0.55) * smoothstep(1.0, 0.6, d);
+  // streaks of foam drawn out across the pool by the current, radiating from the fall
+  float rays = smoothstep(0.62, 0.85, wf(vec2(ang * 5.0, d * 2.5 - uTime * 0.5))) * smoothstep(1.0, 0.35, d) * 0.7;
+  foam = max(foam, rays);
   float rim = smoothstep(1.0, 0.85, length(vUv - 0.5) * 2.0);
   vec3 water = vec3(0.04, 0.06, 0.065);
-  vec3 c = mix(water, vec3(0.84, 0.87, 0.88), foam) * uLight;
+  vec3 c = mix(water, vec3(0.78, 0.81, 0.83) * (0.8 + 0.2 * boil), foam) * uLight;
   float a = mix(0.82, 1.0, foam) * rim;
   gl_FragColor = vec4(c, a);
 #include <fog_fragment>
@@ -212,7 +250,7 @@ function sprayCloud(at: THREE.Vector3, size: number, height: number, wind: THREE
   for (let i = 0; i < count; i++) {
     const t = Math.pow(r(), 1.4); // most of it low down
     const m = new THREE.SpriteMaterial({ map: mistTexture(), color: new THREE.Color(0.8, 0.83, 0.86), transparent: true, depthWrite: false, fog: true,
-      opacity: (0.5 - t * 0.35) * (0.55 + r() * 0.45) });
+      opacity: (0.62 - t * 0.42) * (0.55 + r() * 0.45) });
     m.rotation = r() * 6.28;
     const s = new THREE.Sprite(m);
     const spread = size * (0.4 + t * 1.2);
@@ -221,6 +259,7 @@ function sprayCloud(at: THREE.Vector3, size: number, height: number, wind: THREE
     s.scale.set(k * 1.3, k, 1);
     s.renderOrder = 8;
     g.add(s);
+    billow(s, height * 0.25, wind.clone().multiplyScalar(height * 0.3), 6 + r() * 6);
   }
   return g;
 }
@@ -294,21 +333,25 @@ export function waterfall(f: Fall, opts: { faceSetback: number; seed: number; wi
   poolGeo.translate(impact.x, Math.min(rimY, floor + 1.6), impact.z);
   add(poolGeo, plungeMaterial(poolR, new THREE.Vector2(impact.x, impact.z)), 7);
 
-  // the boil: a mound of white water heaving up where the fall hits the pool
+  // the boil: a mound of white water heaving up where the fall hits the pool, as soft
+  // puffs piled over the impact, densest and whitest low down
   {
-    const br = W * 0.55 + 1.5;
-    const dome = new THREE.SphereGeometry(1, 40, 12, 0, Math.PI * 2, 0, Math.PI / 2);
-    const dp = dome.attributes.position;
-    for (let i = 0; i < dp.count; i++) {
-      const x = dp.getX(i), y = dp.getY(i), z = dp.getZ(i);
-      const bump = 1 + 0.25 * Math.sin(x * 7 + opts.seed) * Math.cos(z * 6 - opts.seed) + 0.15 * Math.sin(x * 15 + z * 11);
-      dp.setXYZ(i, x * br * (1 + 0.15 * y), y * (W * 0.12 + 1.2) * bump, z * br * 0.8 * (1 + 0.15 * y));
+    const br = W * 0.55 + 1.5, bh = W * 0.22 + 2.2;
+    const baseY = Math.min(groundHeight(f.pool[0] + (W * 0.95 + 3) * 1.1, f.pool[1]) - 0.35, floor + 1.6);
+    const n = 40 + Math.round(W * 4);
+    for (let i = 0; i < n; i++) {
+      const ang = r() * Math.PI * 2, rad = Math.sqrt(r()) * br, h = Math.pow(r(), 1.6) * bh * (1 - (rad / br) * 0.6);
+      const m = new THREE.SpriteMaterial({ map: mistTexture(), color: new THREE.Color().setScalar(0.82 + r() * 0.12), transparent: true, depthWrite: false, fog: true,
+        opacity: 0.55 + r() * 0.35 });
+      m.rotation = r() * 6.28;
+      const sp = new THREE.Sprite(m);
+      sp.position.set(impact.x + Math.cos(ang) * rad, baseY + h + 0.3, impact.z + Math.sin(ang) * rad * 0.8);
+      const k = (1.2 + r() * 2.2) * (0.6 + W * 0.05) * (1 - h / bh * 0.3);
+      sp.scale.set(k * 1.2, k, 1);
+      sp.renderOrder = 12;
+      g.add(sp);
+      billow(sp, bh * 0.5, wind.clone().multiplyScalar(br * 0.5), 2.5 + r() * 2.5);
     }
-    dome.computeVertexNormals();
-    const uv = dome.attributes.uv;
-    for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i), 1 - uv.getY(i));
-    dome.translate(impact.x, Math.min(groundHeight(f.pool[0] + (W * 0.95 + 3) * 1.1, f.pool[1]) - 0.35, floor + 1.6) - 0.3, impact.z);
-    add(dome, sheetMaterial(opts.seed + 9, br * 6, br * 3, 2, 0.9), 12);
   }
 
   // spray: a towering cloud at the foot, drifting off on the wind, and mist clinging to the face

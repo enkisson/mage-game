@@ -111,6 +111,7 @@ const SHOTS: Record<string, Shot> = {
   wreck: { pos: [-48, 1.6, 30], look: [-72, 10, 14], fov: 55, exposure: 1.0 },
   // the sea, from the waterline
   sea: { pos: [-30, 1.6, 32], look: [-140, 10, 150], fov: 55, exposure: 1.0 },
+  fallfoot: { pos: [-27, 1.7, -24], look: [-38, 12, -50], fov: 55, exposure: 1.0 },
 };
 
 async function shot(name: string): Promise<string> {

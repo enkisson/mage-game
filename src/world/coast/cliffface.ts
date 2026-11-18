@@ -1,11 +1,14 @@
 // The cliffs of the bay: a wall of basalt about 85 m tall traced along the foot of the cliffs,
 // after Reynisfjara.
 //
-// There are two parts. At the foot stands a colonnade of real columns: hexagonal prisms a metre
-// or so across, straight up, packed side by side like organ pipes. Here and there one has broken
-// off short, and in places they step down onto the beach as a stair. Above them, overhanging
-// them a little, rises the rest of the wall. That part is vertical, rough rock split by vertical
-// fractures into blocks, with a few ledges, clefts and caves, and a shoulder of turf at the top.
+// It is columns nearly to the top: hexagonal prisms a metre or so across, straight up, packed
+// side by side like organ pipes. Where the wall is tall they stand in two flows, the lower of
+// big columns and the upper of thinner ones a little back, with a thin red-brown contact of
+// rubble between. Here and there a column has broken off short, and in places they step down
+// onto the beach as a stair. Sea caves open in their foot, and they line the hollows the falls
+// have scoured. Over the last of them, flush with them, lies the cap: the rough top of the last
+// flow, the columns running up into it thinner and fanning until they lose themselves in it,
+// and over that a shoulder of turf, 3-10 m of rock in all.
 //
 // The plan is angular, never smoothly curved. The outline is cut into straight legs (see
 // layout.ts), and the face is broken again into blocks a few metres wide that stand forward or
@@ -60,14 +63,12 @@ interface Block {
   s0: number; s1: number;
   /** How far forward of the foot line it stands. */
   depth: number;
-  /** How tall its columns are, over the ground; 0 for none. */
-  colH: number;
-  /** Radius of its columns. */
-  colA: number;
-  /** How far the rock above overhangs the columns. */
-  over: number;
-  /** Where the face steps back at a ledge, and by how much. */
-  ledges: { y: number; back: number }[];
+  /** Radius of the columns in the lower flow, and in the upper. */
+  colA: number; colA2: number;
+  /** How far the upper flow stands back of the lower. */
+  back2: number;
+  /** This block's nudges to where the flows meet, how thick the contact is, and the cap. */
+  splitJ: number; band: number; capJ: number;
   /** A stair of columns stepping down onto the beach in front: rows, and the tallest step. */
   stair: { rows: number; h: number } | null;
 }
@@ -80,16 +81,16 @@ const BLOCKS: Block[] = (() => {
     const mid = footAt(s + len / 2);
     const canyon = mid.z < -57;
     const seaward = mid.x < -85 || mid.z > 20;
-    // the columns run in long stretches, taller on the sea-facing headland
-    const run = fbm(s * 0.012, 7.7, 2);
-    const colH = canyon ? 0 : Math.max(8, (seaward ? 26 : 18) + run * 12 + (hash(k, 2) - 0.5) * 1.5);
     out.push({
       s0: s, s1: s + len,
-      depth: (hash(k, 3) - 0.5) * 2.8 + fbm(s * 0.03, 2.2, 2) * 1.2,
-      colH,
-      colA: 0.42 + hash(Math.floor(s / 40), 4) * 0.22 + hash(k, 5) * 0.05,
-      over: 0.4 + hash(k, 6) * 1.5,
-      ledges: [0, 1].filter((j) => hash(k, 7 + j) < 0.45).map((j) => ({ y: 0.3 + hash(k, 9 + j) * 0.55, back: 0.5 + hash(k, 11 + j) * 1.4 })),
+      // whole buttresses of columns stand forward of the wall, others are recessed into it
+      depth: ((hash(k, 3) - 0.5) * 2.8 + fbm(s * 0.03, 2.2, 2) * 1.2 + (hash(k, 16) < 0.15 ? 2.5 + hash(k, 17) * 2.5 : 0)) * (canyon ? 0.5 : seaward ? 1.5 : 1),
+      colA: 0.45 + hash(Math.floor(s / 40), 4) * 0.22 + hash(k, 5) * 0.05,
+      colA2: 0.34 + hash(Math.floor(s / 33), 6) * 0.2 + hash(k, 7) * 0.04,
+      back2: 0.2 + Math.pow(hash(k, 8), 2) * 2.6,
+      splitJ: (hash(k, 9) - 0.5) * 2.5,
+      band: 0.5 + hash(k, 10) * 1.1,
+      capJ: (hash(k, 11) - 0.5) * 2,
       stair: !canyon && hash(k, 13) < (seaward ? 0.45 : 0.18) ? { rows: 1 + Math.floor(hash(k, 14) * 4), h: 3 + hash(k, 15) * 8 } : null,
     });
     s += len; k++;
@@ -102,13 +103,6 @@ function blockAt(s: number): Block {
   while (lo < hi) { const m = (lo + hi + 1) >> 1; if (BLOCKS[m].s0 <= s) lo = m; else hi = m - 1; }
   return BLOCKS[lo];
 }
-
-/** Clefts cut down from the top of the wall, with straight sides. */
-const CLEFTS = (() => {
-  const out: { s: number; w: number; d: number; low: number }[] = [];
-  for (let s = 25, k = 0; s < LENGTH; s += 35 + hash(k, 21) * 60, k++) out.push({ s, w: 1.2 + hash(k, 22) * 3, d: 2 + hash(k, 23) * 4, low: 0.2 + hash(k, 24) * 0.5 });
-  return out;
-})();
 
 /** Sea caves under the headland: where, how wide, how high. */
 const CAVES = [
@@ -142,24 +136,61 @@ function hereAt(p: Foot): Here {
     const df = Math.hypot(p.x - f.x, p.z - f.z), hw = f.width * 0.6 + 1;
     const k = 1 - smoothstep(hw, hw + 1.2, df);
     alcove = Math.max(alcove, k * fallRecess(f));
-    if (df < hw + 3) noCols = true;
     calm = Math.max(calm, 1 - smoothstep(hw + 1, hw + 6, df));
   }
   for (const c of CAVES) {
     const u = Math.hypot(p.x - c.x, p.z - c.z) / (c.w / 2);
     if (u < 1) cave = { h: c.h * Math.sqrt(1 - u * u) * (0.85 + 0.15 * fbm(p.s * 0.4, 1, 2)) };
-    if (u < 1.6) noCols = true;
   }
   return { alcove, cave, noCols, calm };
+}
+
+// ---- the profile ------------------------------------------------------------------------------
+
+/**
+ * How the wall is built at one place along it. Columns run from the beach nearly to the top,
+ * in one flow, or where the wall is tall in two: the lower of big columns, a thin rubbly
+ * contact, and the upper of thinner ones standing a little back. Over them, flush with them,
+ * is the cap: the rough top of the last flow, 3-10 m of it, under the turf.
+ */
+interface Tier { y0: number; y1: number; a: number; back: number; lower: boolean }
+interface Profile {
+  p: Foot; nx: number; nz: number; ground: number; top: number; foot: number;
+  blk: Block; bi: number; here: Here; wild: number;
+  colTop: number; tiers: Tier[]; band: [number, number] | null;
+}
+
+function profile(s: number, corner = false): Profile {
+  const p = footAt(s, corner);
+  const nl = Math.hypot(p.nx, p.nz), nx = p.nx / nl, nz = p.nz / nl;
+  const ground = groundHeight(p.x + nx * 5, p.z + nz * 5);
+  const top = plateauAt(p.x - nx * 6, p.z - nz * 6) + 0.6;
+  const foot = Math.min(ground - 5, top - 6);
+  const blk = blockAt(s), bi = BLOCKS.indexOf(blk);
+  const here = hereAt(p);
+  const capH = 3.5 + (fbm(s * 0.015, 3.1, 2) * 0.5 + 0.5) * 6 + blk.capJ;
+  const colTop = top - capH;
+  const base = ground + (here.cave ? here.cave.h + 0.3 : 0);
+  const tiers: Tier[] = [];
+  let band: [number, number] | null = null;
+  if (colTop - base > 8) {
+    if (colTop - ground > 42) {
+      const split = ground + (colTop - ground) * (0.47 + fbm(s * 0.02, 5.5, 2) * 0.12) + blk.splitJ;
+      band = [split, split + blk.band];
+      if (split > base + 3) tiers.push({ y0: base, y1: split, a: blk.colA, back: 0, lower: true });
+      tiers.push({ y0: split + blk.band, y1: colTop, a: blk.colA2, back: blk.back2, lower: false });
+    } else tiers.push({ y0: base, y1: colTop, a: blk.colA, back: 0, lower: true });
+  }
+  return { p, nx, nz, ground, top, foot, blk, bi, here, wild: 1 - here.calm, colTop: tiers.length ? colTop : -1e3, tiers, band };
 }
 
 // ---- the face --------------------------------------------------------------------------------
 
 /**
- * The wall above the columns (and behind them, and inside the caves), with its turf cap.
- * Attributes: `faceA` = (s, top, ground, colTop), `faceB` = (kind, block id, cave, alcove),
- * `faceC` = the way the foot line faces. Kind: 0 the open face, 1 behind the columns, 2 a cave,
- * 3 the turf cap.
+ * The rock behind the columns, the contact between flows, the cap above, the caves, and the
+ * turf on top. Attributes: `faceA` = (s, top, ground, colTop), `faceB` = (kind, block id,
+ * cave, alcove), `faceC` = the way the foot line faces. Kind: 0 the cap, 1 behind the columns,
+ * 2 a cave, 3 the turf on top, 4 the contact between two flows.
  */
 export function cliffFace(hstep = 0.4, vstep = 0.8): THREE.BufferGeometry {
   // where to put a line of vertices: evenly, plus every corner, plus both sides of every
@@ -177,66 +208,52 @@ export function cliffFace(hstep = 0.4, vstep = 0.8): THREE.BufferGeometry {
   const cols: { start: number; key: number[] }[] = [];
   let vi = 0;
   for (const { s, corner } of ss) {
-    const p = footAt(s, corner);
-    const nl = Math.hypot(p.nx, p.nz);
-    const ground = groundHeight(p.x + (p.nx / nl) * 5, p.z + (p.nz / nl) * 5);
-    const top = plateauAt(p.x - (p.nx / nl) * 6, p.z - (p.nz / nl) * 6) + 0.6;
-    const foot = Math.min(ground - 5, top - 6);
-    const blk = blockAt(s), bi = BLOCKS.indexOf(blk);
-    const here = hereAt(p);
-    // the underside of the rock over the columns is ragged, not a ruled line
-    const colTop = blk.colH > 0 && !here.noCols ? Math.min(ground + blk.colH, top - 14) + fbm(s * 0.45, bi * 0.7, 2) * 1.8 : -1e3;
+    const P = profile(s, corner);
+    const { p, nx, nz, ground, top, foot, blk, bi, here, wild, colTop, tiers, band } = P;
     // the heights of this line's vertices: even steps, plus a pair at every sharp change
     const ys: number[] = [];
     const nRows = Math.max(3, Math.ceil((top - foot) / vstep));
     for (let j = 0; j <= nRows; j++) ys.push(foot + ((top - foot) * j) / nRows);
-    // the rock is quieter round the falls, where the water has worn it
-    const wild = 1 - here.calm;
-    const lowY = colTop > -1e3 ? colTop : ground;
-    const ledgeY = (l: { y: number }) => lowY + 6 + (top - lowY - 16) * l.y;
-    const lipH = 1.5 + hash(bi, 61) * 3.5;
-    const sharp = [colTop, colTop + lipH, ...blk.ledges.map(ledgeY)];
-    if (here.cave) sharp.push(ground + here.cave.h);
-    for (const c of CLEFTS) if (Math.abs(s - c.s) < c.w) sharp.push(top - (top - ground) * (1 - c.low));
+    const sharp = [colTop, ...(band ?? [])];
+    for (const t of tiers) sharp.push(t.y0);
     for (const y of sharp) if (y > foot + 0.2 && y < top - 0.2) ys.push(y - 0.03, y + 0.03);
     ys.sort((a, b) => a - b);
+    const upperBack = tiers.length ? tiers[tiers.length - 1].back : 0;
 
     const start = vi, key: number[] = [];
     for (const y of ys) {
       let d = blk.depth * wild, kind = 0;
       const h01 = (y - foot) / (top - foot);
-      if (y < colTop) {
+      const tier = tiers.find((t) => y >= t.y0 && y < t.y1);
+      if (tier) {
         // behind the columns: a dark back wall
-        d += -2.6 + fbm(s * 0.5, y * 0.2, 2) * 0.3;
+        d += -2.6 - tier.back + fbm(s * 0.5, y * 0.2, 2) * 0.3;
         kind = 1;
+      } else if (band && y >= band[0] && y < band[1]) {
+        // the contact between two flows: rubble, weathered back a little behind the columns
+        d += -1.25 + fbm(s * 0.6, y * 0.6, 2) * 0.25;
+        kind = 4;
+      } else if (y < colTop) {
+        // below the lowest columns (over a cave): plain rock
+        d += -0.9 + facets(s, y) * 0.3;
       } else {
-        // the rock over the columns juts out at its foot, then rises sheer
-        const above = y - Math.max(colTop, foot);
-        // as a block with a flat front and a square shoulder, not a rolled lip
-        d += blk.over * wild * (colTop > -1e3 ? 1 - smoothstep(lipH - 0.03, lipH + 0.03, above) * (0.4 + hash(bi, 62) * 0.5) : 0.4);
-        // vertical fractures: long grooves and ribs, split into blocks
-        d += (facets(s, y) + fbm(s * 0.21 + bi * 0.37, y * 0.016, 2) * 1.2 + fbm(s * 2.2, y * 0.2, 2) * 0.15) * (0.3 + 0.7 * wild);
-        // a few ledges where the face steps back
-        for (const l of blk.ledges) d -= l.back * wild * smoothstep(-0.02, 0.02, y - ledgeY(l));
-        // clefts cut down from the top, straight-sided
-        for (const c of CLEFTS) {
-          const dc = Math.abs(s - c.s);
-          if (dc < c.w) d -= c.d * (1 - smoothstep(c.w * 0.5, c.w * 0.5 + 0.35, dc)) * smoothstep(-0.02, 0.02, y - (top - (top - ground) * (1 - c.low)));
-        }
+        // the cap: flush with the columns below, the columns breaking up into it
+        d += -0.85 - upperBack + (facets(s, y) * 0.45 + fbm(s * 0.21 + bi * 0.37, y * 0.03, 2) * 0.5) * smoothstep(colTop, colTop + 4, y) * (0.4 + 0.6 * wild);
+        d += fbm(s * 2.2, y * 0.2, 2) * 0.12;
         // the shoulder of turf at the top, rounding back, and its lip hanging over
-        d -= Math.pow(smoothstep(top - 6, top, y), 2) * 2.6 * wild;
-        d += smoothstep(top - 0.9, top - 0.15, y) * 0.7 * wild;
+        d -= Math.pow(smoothstep(top - 3.5, top, y), 2) * 1.6 * wild;
+        d += smoothstep(top - 0.8, top - 0.15, y) * 0.5 * wild;
       }
       // the alcove behind each fall, sheer-sided, scoured deeper at its foot
       d -= here.alcove * (1 + 0.35 * (1 - h01));
       // the sea caves
       if (here.cave && y < ground + here.cave.h) { d -= 7 + fbm(s * 0.3, y * 0.3, 2) * 1.2; kind = 2; }
       // grain
-      d += fbm(s * 2.6, y * 2.6, 2) * 0.07;
+      d += fbm(s * 2.6, y * 2.6, 2) * 0.05;
       pos.push(p.x + p.nx * d, y, p.z + p.nz * d);
       A.push(s, top, ground, colTop);
       B.push(kind, bi, here.cave ? here.cave.h : 0, here.alcove);
-      C.push(p.nx / nl, p.nz / nl);
+      C.push(nx, nz);
       key.push(y);
       vi++;
     }
@@ -244,12 +261,12 @@ export function cliffFace(hstep = 0.4, vstep = 0.8): THREE.BufferGeometry {
     const ex = pos[pos.length - 3], ez = pos[pos.length - 1];
     for (let k = 1; k <= CAP_ROWS; k++) {
       const back = k * k * 0.12 + k * 0.35;
-      const qx = ex - (p.nx / nl) * back, qz = ez - (p.nz / nl) * back;
+      const qx = ex - nx * back, qz = ez - nz * back;
       const y = plateauAt(qx, qz) + 0.05;
       pos.push(qx, y, qz);
       A.push(s, y + 0.4, ground, -1e3);
       B.push(3, bi, 0, 0);
-      C.push(p.nx / nl, p.nz / nl);
+      C.push(nx, nz);
       key.push(1000 + k);
       vi++;
     }
@@ -288,13 +305,13 @@ export function cliffFace(hstep = 0.4, vstep = 0.8): THREE.BufferGeometry {
 export function colonnade(): THREE.BufferGeometry {
   const P: number[] = [], A: number[] = [], B: number[] = [], T: number[] = [];
   let id = 0;
-  const prism = (cx: number, cz: number, tx: number, tz: number, a: number, base: number, top: number, colTop: number, under: number) => {
+  const prism = (cx: number, cz: number, tx: number, tz: number, a: number, base: number, top: number, colTop: number, under: number, lean = 0) => {
     id++;
     const nx = -tz, nz = tx;
     // a slightly irregular hexagon, flat face to the front
     const vx: number[] = [], vz: number[] = [];
     for (let j = 0; j < 6; j++) {
-      const th = (j * Math.PI) / 3, r = a * (0.92 + hash(id, j) * 0.14);
+      const th = (j * Math.PI) / 3, r = a * (0.9 + hash(id, j) * 0.18);
       vx.push(cx + (tx * Math.cos(th) + nx * Math.sin(th)) * r);
       vz.push(cz + (tz * Math.cos(th) + nz * Math.sin(th)) * r);
     }
@@ -307,7 +324,8 @@ export function colonnade(): THREE.BufferGeometry {
       const k = (j + 1) % 6;
       const w = Math.hypot(vx[k] - vx[j], vz[k] - vz[j]);
       const ex = (vx[k] - vx[j]) / w, ez = (vz[k] - vz[j]) / w;
-      const quad = [[vx[j], base, vz[j], 0], [vx[k], base, vz[k], w], [vx[k], ty(k), vz[k], w], [vx[j], base, vz[j], 0], [vx[k], ty(k), vz[k], w], [vx[j], ty(j), vz[j], 0]];
+      const lx = (y: number) => tx * lean * (y - base), lz = (y: number) => tz * lean * (y - base);
+      const quad = [[vx[j], base, vz[j], 0], [vx[k], base, vz[k], w], [vx[k] + lx(ty(k)), ty(k), vz[k] + lz(ty(k)), w], [vx[j], base, vz[j], 0], [vx[k] + lx(ty(k)), ty(k), vz[k] + lz(ty(k)), w], [vx[j] + lx(ty(j)), ty(j), vz[j] + lz(ty(j)), 0]];
       // wind the triangles so they face out
       const order = [0, 2, 1, 3, 5, 4];
       for (const q of order) {
@@ -320,7 +338,7 @@ export function colonnade(): THREE.BufferGeometry {
     }
     for (const [i0, i1, i2] of [[0, 2, 1], [0, 3, 2], [0, 4, 3], [0, 5, 4]]) {
       for (const j of [i0, i1, i2]) {
-        P.push(vx[j], ty(j), vz[j]);
+        P.push(vx[j] + tx * lean * (ty(j) - base), ty(j), vz[j] + tz * lean * (ty(j) - base));
         A.push(id, 0.5, 1, 4);
         B.push(base, top, colTop, under);
         T.push(1, 0, 0);
@@ -328,48 +346,62 @@ export function colonnade(): THREE.BufferGeometry {
     }
   };
   for (const blk of BLOCKS) {
-    if (blk.colH <= 0) continue;
-    const a = blk.colA, step = 1.5 * a;
-    const n = Math.floor((blk.s1 - blk.s0) / step);
-    for (let i = 0; i < n; i++) {
-      const s = blk.s0 + a * 0.75 + i * step;
-      const p = footAt(s);
-      const here = hereAt(p);
-      if (here.noCols) continue;
-      const nl = Math.hypot(p.nx, p.nz), nx = p.nx / nl, nz = p.nz / nl;
-      const ground = groundHeight(p.x + nx * 5, p.z + nz * 5);
-      const top = plateauAt(p.x - nx * 6, p.z - nz * 6) + 0.6;
-      const colTop = Math.min(ground + blk.colH, top - 14);
-      if (colTop < ground + 4) continue;
-      // the honeycomb: every other column sits half a row back
-      const zig = i & 1 ? -0.866 * a : 0;
-      const at = (row: number) => {
-        const d = blk.depth - 1.25 + zig + row * 1.732 * a + (hash(i, row + 31) - 0.5) * 0.18;
-        return [p.x + nx * d, p.z + nz * d];
-      };
-      const baseAt = (x: number, z: number) => groundHeight(x, z) - 2.5;
-      // the back row, up into the rock above
-      {
-        const [x, z] = at(-1);
-        prism(x, z, p.tx, p.tz, a, baseAt(x, z), colTop + 2.5, colTop, 1);
-      }
-      // the front row: most reach the overhang, some have broken off short
-      {
-        const [x, z] = at(0);
-        const broken = hash(i + blk.s0, 41) < 0.1;
-        const h = broken ? ground + (colTop - ground) * (0.35 + hash(i, 42) * 0.5) : colTop + (hash(i, 43) - 0.6) * 3.2;
-        prism(x, z, p.tx, p.tz, a, baseAt(x, z), h, colTop, broken ? 0 : 1);
-      }
-      // the stair
-      if (blk.stair) {
-        const t = (s - blk.s0) / (blk.s1 - blk.s0);
-        const env = Math.pow(Math.sin(Math.PI * Math.min(1, Math.max(0, t))), 0.5);
-        for (let r = 1; r <= blk.stair.rows; r++) {
-          const [x, z] = at(r);
-          const g = groundHeight(x, z);
-          const h = blk.stair.h * (1 - (r - 1) / (blk.stair.rows + 0.5)) * env * (0.55 + hash(i, r + 50) * 0.6);
-          if (h < 0.6) continue;
-          prism(x, z, p.tx, p.tz, a, g - 2.5, g + h, colTop, 0);
+    // each flow is laid out on its own, with its own size of column
+    for (const lower of [true, false]) {
+      const a = lower ? blk.colA : blk.colA2, step = 1.5 * a;
+      const n = Math.floor((blk.s1 - blk.s0) / step);
+      for (let i = 0; i < n; i++) {
+        const s = blk.s0 + a * 0.75 + i * step;
+        const P = profile(s);
+        const tier = P.tiers.find((t) => t.lower === lower);
+        if (!tier) continue;
+        const { p, nx, nz } = P;
+        // the honeycomb: every other column sits half a row back, and none quite in line
+        const zig = i & 1 ? -0.866 * a : 0;
+        const at = (row: number) => {
+          const d = blk.depth * P.wild - 1.25 - tier.back - P.here.alcove + zig + row * 1.732 * a + (hash(i + blk.s0, row + 31) - 0.5) * 0.5;
+          return [p.x + nx * d, p.z + nz * d];
+        };
+        // a flow's columns lean together, a degree or two, swinging slowly along the wall
+        const lean = fbm(s * 0.025, lower ? 1.5 : 6.5, 2) * 0.05;
+        const ar = (row: number) => a * (0.85 + hash(i + blk.s0 * 1.3, row + 61) * 0.3);
+        const baseAt = (x: number, z: number) => (tier.lower && !P.here.cave ? groundHeight(x, z) - 2.5 : tier.y0 - 0.2);
+        // where the tops end: under the contact, the lower flow's columns stop short of it; at
+        // the cap, the upper flow's run raggedly up into it, some standing proud of it
+        const topOf = (row: number) => {
+          const j = hash(i + blk.s0 * 3.1, row + 43);
+          if (tier.lower && P.band) return row < 0 ? tier.y1 + 0.6 : tier.y1 - j * 0.9;
+          return row < 0 ? tier.y1 + 3 : tier.y1 + (j - 0.62) * 4.5;
+        };
+        // the back rows, up into the rock above
+        { const [x, z] = at(-2); prism(x, z, p.tx, p.tz, ar(-2), baseAt(x, z), topOf(-1), tier.y1, 0, lean); }
+        { const [x, z] = at(-1); prism(x, z, p.tx, p.tz, ar(-1), baseAt(x, z), topOf(-1), tier.y1, 0, lean); }
+        // the front row: many have lost their upper lengths, broken off along a joint, so the
+        // face steps in and out where the frost has worked; the taller the flow, the more
+        {
+          const [x, z] = at(0);
+          const tall = tier.y1 - tier.y0;
+          const broken = hash(i + blk.s0, lower ? 41 : 44) < Math.min(0.55, 0.08 + tall * 0.008);
+          const h = broken ? tier.y0 + tall * Math.pow(hash(i + blk.s0, 42), 0.7) * 0.95 : topOf(0);
+          prism(x, z, p.tx, p.tz, ar(0), baseAt(x, z), h, tier.y1, tier.lower && P.band ? 0.5 : 0, lean);
+          // and in front of a few, the stump of one more, a step or two high
+          if (hash(i + blk.s0, 45) < 0.12 && tier.lower) {
+            const [fx, fz] = at(1);
+            const g = baseAt(fx, fz);
+            prism(fx, fz, p.tx, p.tz, ar(1), g, tier.y0 + 1 + hash(i, 46) * Math.min(12, tall * 0.3), tier.y1, 0, lean);
+          }
+        }
+        // the stair
+        if (blk.stair && tier.lower && !P.here.cave && P.here.alcove < 0.5) {
+          const t = (s - blk.s0) / (blk.s1 - blk.s0);
+          const env = Math.pow(Math.sin(Math.PI * Math.min(1, Math.max(0, t))), 0.5);
+          for (let r = 1; r <= blk.stair.rows; r++) {
+            const [x, z] = at(r);
+            const g = groundHeight(x, z);
+            const h = blk.stair.h * (1 - (r - 1) / (blk.stair.rows + 0.5)) * env * (0.55 + hash(i, r + 50) * 0.6);
+            if (h < 0.6) continue;
+            prism(x, z, p.tx, p.tz, a, g - 2.5, g + h, tier.y1, 0);
+          }
         }
       }
     }
@@ -474,6 +506,14 @@ export function cliffMaterial(rock: TextureSet): THREE.MeshStandardMaterial {
       float frac = (1.0 - smoothstep(0.0, 0.045, 1.0 - fr)) * smoothstep(0.35, 0.6, cn(vec2(floor(fq) * 3.1, y * 0.025)));
       float xj = (1.0 - smoothstep(0.0, 0.03, abs(fract(y * 0.21 + (cn(vec2(sAlong * 0.3, 0.0)) - 0.5) * 0.6) - 0.5) * 2.0 - 0.95)) * smoothstep(0.65, 0.8, cn(vec2(sAlong * 0.25, y * 0.1)));
       c *= 1.0 - frac * 0.6 - xj * 0.25;
+      // just above the columns they do not stop at a line: they run on up into the cap,
+      // thinner and fanning, losing their edges and their joints as they go
+      float entab = (1.0 - smoothstep(colTop + 0.5, colTop + 6.0 + cn(vec2(sAlong * 0.2, 2.0)) * 6.0, y)) * step(-500.0, colTop) * (kind < 0.5 ? 1.0 : 0.0);
+      float eq = (sAlong + (y - colTop) * sin(sAlong * 0.09 + blockId) * 0.3) / (0.55 + ch(vec2(blockId, 8.0)) * 0.3);
+      float ef = fract(eq);
+      float ejoint = (1.0 - smoothstep(0.0, 0.06, min(ef, 1.0 - ef))) * smoothstep(0.3, 0.6, cn(vec2(floor(eq) * 1.7, y * 0.3)) + entab * 0.3);
+      float ecross = (1.0 - smoothstep(0.0, 0.04, abs(fract(y * 1.3 + ch(vec2(floor(eq), 2.0))) - 0.5) * 2.0 - 0.93)) * step(0.55, ch(vec2(floor(eq), floor(y * 1.3))));
+      c *= 1.0 - (ejoint * 0.65 + ecross * 0.4) * entab;
       // water streaks running down from every ledge and crack
       float streak = smoothstep(0.5, 0.85, cn(vec2(sAlong * 0.9, y * 0.015)) * 0.7 + cn(vec2(sAlong * 3.1, y * 0.04)) * 0.3);
       c *= 1.0 - streak * 0.4 * (1.0 - abs(gn.y));
@@ -483,6 +523,9 @@ export function cliffMaterial(rock: TextureSet): THREE.MeshStandardMaterial {
       // yellow-grey lichen crusts
       float lichen = smoothstep(0.62, 0.8, cf(vCW.xy * 0.33 + vCW.zy * 0.21));
       c = mix(c, vec3(0.19, 0.18, 0.1), lichen * 0.4);
+      // the contact between two flows: red-brown rubble, the old flow top baked by the next
+      float contact = kind > 3.5 ? 1.0 : 0.0;
+      c = mix(c, vec3(0.13, 0.085, 0.062) * (0.55 + tl * 0.9) * (0.65 + cn(vCW.xz * 3.0 + y * 2.5) * 0.7), contact);
       // ---- moss and turf ----
       float wetFall = fallWet();
       float canyon = vCW.z < -58.0 ? 1.0 : 0.0;
@@ -491,8 +534,10 @@ export function cliffMaterial(rock: TextureSet): THREE.MeshStandardMaterial {
       // moss hangs down the face in curtains where water seeps, thickest in the canyon
       float curtain = smoothstep(0.6, 0.8, cf(vec2(sAlong * 0.22, y * 0.02)) * 0.7 + cn(vec2(sAlong * 0.9, y * 0.03)) * 0.3 + canyon * 0.06 + wetFall * 0.12 + streak * 0.12);
       float inCrack = (frac + xj) * smoothstep(0.45, 0.7, cn(vec2(sAlong * 0.6, y * 0.3))) * (0.4 + wetFall + canyon * 0.6);
-      float moss = max(max(ledge, curtain * smoothstep(-0.6, 0.1, upish)), inCrack);
-      moss = max(moss, smoothstep(5.0, 1.0, top - y + (cn(vec2(sAlong * 0.3, 1.0)) - 0.5) * 3.0));   // the turf shoulder at the top
+      float moss = max(max(ledge, curtain * smoothstep(-0.6, 0.1, upish)), max(inCrack, contact * smoothstep(0.35, 0.7, cn(vec2(sAlong * 0.4, 1.0))) * 0.85));
+      moss = max(moss, smoothstep(4.5, 0.5, top - y + (cn(vec2(sAlong * 0.3, 1.0)) - 0.5) * 3.0));   // the turf shoulder at the top
+      // turf and grass hang in tongues down the cap, the rubbly top of the last flow
+      moss = max(moss, step(colTop, y) * smoothstep(0.5, 0.75, cf(vec2(sAlong * 0.15, y * 0.1)) + smoothstep(colTop + 2.0, top, y) * 0.35) * (kind < 0.5 ? 1.0 : 0.0));
       moss *= smoothstep(1.5, 6.0, y - ground + 2.0);                                          // not where the sea scours
       if (kind > 2.5) moss = 1.0;                                                             // the cap
       vec3 mossC = mossColour(vCW);
@@ -510,14 +555,15 @@ export function cliffMaterial(rock: TextureSet): THREE.MeshStandardMaterial {
       cRough = mix(mix(0.88 - streak * 0.1, 0.2, wet), 0.93, moss);
       cAO = mix(1.0, 0.35, hidden) * (1.0 - frac * 0.4 * (1.0 - moss)) * mix(1.0, 0.6, smoothstep(-0.1, -0.6, gn.y));
       // under the overhang over the columns the rock is shaded
-      cAO *= mix(0.55, 1.0, smoothstep(colTop, colTop + 5.0, y));
+      cAO *= kind < 0.5 ? mix(0.6, 1.0, smoothstep(colTop, colTop + 1.2, y)) : 1.0;
+      cAO *= mix(1.0, 0.7, contact);
       // ---- normal ----
       vec3 tn = ctri(rNor, 0.08) * 2.0 - 1.0, tn2 = ctri(rNor, 0.31) * 2.0 - 1.0;
       vec3 tilt3 = (tn + tn2 * 0.7) * 0.4;
       // the fractures are grooves: the face turns in at either side of each
       vec3 tg = normalize(cross(up, gn) + vec3(1e-4, 0.0, 0.0));
       float side = (fract(fq) - 0.5) * 2.0;
-      vec3 nn = normalize(gn + vec3(tilt3.x, tilt3.y * 0.5, tilt3.x) * (1.0 - moss * 0.6) + tg * sign(side) * smoothstep(0.75, 1.0, abs(side)) * 0.5 * smoothstep(0.35, 0.6, cn(vec2(floor(fq) * 3.1, y * 0.025))));
+      vec3 nn = normalize(gn + tg * (ef - 0.5) * 1.1 * entab * (1.0 - moss) + vec3(tilt3.x, tilt3.y * 0.5, tilt3.x) * (1.0 - moss * 0.6) + tg * sign(side) * smoothstep(0.75, 1.0, abs(side)) * 0.5 * smoothstep(0.35, 0.6, cn(vec2(floor(fq) * 3.1, y * 0.025))));
       cN = nn;`,
     '');
 }
@@ -538,7 +584,9 @@ export function columnMaterial(rock: TextureSet): THREE.MeshStandardMaterial {
       vec3 a = ctri(rMap, 0.11), b = ctri(rMap, 0.43);
       float tl = dot(mix(a, b, 0.5), vec3(0.3, 0.55, 0.15));
       // ---- the stone: near-black basalt, each column its own shade ----
-      vec3 c = vec3(0.075, 0.076, 0.08) * (0.55 + tl * 1.2) * (0.8 + cid * 0.4);
+      vec3 c = vec3(0.075, 0.076, 0.08) * (0.55 + tl * 1.2) * (0.68 + cid * 0.64);
+      // and every few metres up, the shade shifts: a band of paler, drier stone, a wetter one
+      c *= 0.85 + 0.3 * cn(vec2(id * 0.37, y * 0.12));
       // a paler grey weathered skin in patches, more on the dry upper columns
       float skin = smoothstep(0.45, 0.75, cf(vec2(um * 0.8 + id * 3.7, y * 0.12)));
       c = mix(c, vec3(0.13, 0.13, 0.128) * (0.7 + tl * 0.5), skin * 0.4 * smoothstep(1.0, 6.0, y - base - 2.5));
@@ -547,11 +595,23 @@ export function columnMaterial(rock: TextureSet): THREE.MeshStandardMaterial {
       float sp = 0.45 + ch(vec2(id, 5.1)) * 1.0;
       float jy = (y + cid * 11.0 + (um - fw * 0.5) * (ch(vec2(id, 6.3)) - 0.5) * 0.3) / sp;
       float jd = abs(fract(jy + 0.5) - 0.5) * sp;
-      float joint = (1.0 - smoothstep(0.008, 0.03, jd)) * step(0.25, ch(vec2(id, floor(jy + 0.5)))) * (1.0 - isTop);
+      float joint = (1.0 - smoothstep(0.012, 0.045, jd)) * step(0.2, ch(vec2(id, floor(jy + 0.5)))) * (1.0 - isTop);
       // the stone just under each joint is chipped paler
       float chip = smoothstep(0.03, 0.06, jd) * (1.0 - smoothstep(0.06, 0.12, jd)) * step(0.5, cn(vec2(um * 6.0, y * 3.0))) * (1.0 - isTop);
-      c *= 1.0 - joint * 0.7;
+      c *= 1.0 - joint * 0.75;
       c += chip * 0.025;
+      // each block between joints weathers on its own: a mosaic of shades, not a stripe
+      c *= 0.78 + 0.44 * ch(vec2(id, floor(jy + 0.5) + 17.0));
+      // ---- weathering across the whole wall, over many columns at once ----
+      float wallU = vCW.x * 0.8 + vCW.z * 0.6;
+      // dark streaks where water runs down off the top, metres wide
+      float runoff = smoothstep(0.52, 0.78, cf(vec2(wallU * 0.09, y * 0.008)) * 0.75 + cn(vec2(wallU * 0.5, y * 0.02)) * 0.25);
+      c *= 1.0 - runoff * 0.45;
+      // pale grey-green lichen and salt in broad patches on the dry stone
+      float pale = smoothstep(0.58, 0.8, cf(vec2(wallU * 0.05, y * 0.035) + 4.1)) * (1.0 - runoff);
+      c = mix(c, vec3(0.16, 0.165, 0.15) * (0.7 + tl * 0.6), pale * 0.45);
+      // and a few columns stained rust-brown where iron seeps out of a joint
+      c = mix(c, vec3(0.13, 0.08, 0.05) * (0.6 + tl), smoothstep(0.86, 0.95, ch(vec2(id, 9.1))) * smoothstep(0.4, 0.7, cn(vec2(id, y * 0.05))) * 0.6);
       // the edges are worn round: a thin lit line down each, and chipped here and there
       float e0 = um, e1 = fw - um;
       float edge = (1.0 - smoothstep(0.0, 0.07, min(e0, e1))) * (1.0 - isTop);
@@ -563,7 +623,10 @@ export function columnMaterial(rock: TextureSet): THREE.MeshStandardMaterial {
       float wetFall = fallWet();
       float drips = under * smoothstep(colTop - 9.0, colTop - 1.0, y) * smoothstep(0.45, 0.7, cf(vec2(um * 1.5 + id * 2.1, y * 0.15)));
       float mossJ = joint * smoothstep(0.4, 0.65, cn(vec2(id, y * 0.4))) * (0.4 + wetFall);
-      float moss = max(max(isTop * smoothstep(0.35, 0.55, cn(vCW.xz * 1.3) + 0.25), drips), mossJ);
+      // moss in long streaks down the wet runs, more in the damp canyon
+      float canyonC = vCW.z < -58.0 ? 1.0 : 0.0;
+      float mossRun = smoothstep(0.62, 0.82, cf(vec2(wallU * 0.13, y * 0.012) + 9.3) + runoff * 0.15 + canyonC * 0.18 + wetFall * 0.2) * smoothstep(0.3, 0.6, cn(vec2(um * 3.0 + id, y * 0.5)));
+      float moss = max(max(isTop * smoothstep(0.35, 0.55, cn(vCW.xz * 1.3) + 0.25), drips), max(mossJ, mossRun));
       moss *= smoothstep(1.0, 4.0, y - base - 2.5) * (1.0 - smoothstep(-20.0, 30.0, vCW.z) * 0.5 * (1.0 - isTop));
       moss = clamp(moss + wetFall * 0.3 * cf(vec2(um, y) * 1.3), 0.0, 1.0);
       c = mix(c, mossColour(vCW), moss);

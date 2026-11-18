@@ -11,7 +11,7 @@ import { mistBank, glow, beam } from './airfx';
 import { marram } from './grass';
 import { arch, boulders, columns, rockMaterial, scatterNear, seaStack } from './cliffs';
 import { cliffFace, cliffMaterial, colonnade, columnMaterial, fallRecess } from './cliffface';
-import { fallUniforms, waterfall } from './falls';
+import { animateFalls, fallUniforms, waterfall } from './falls';
 import { buildBirds } from './birds';
 import { buildSeaRocks } from './searocks';
 import { makeSeatedMage } from '../../art/mage';
@@ -54,7 +54,7 @@ export async function buildBay(source: ModelSource, assets: string): Promise<Bay
   solid(cliffFace(), cliffMaterial(rockTex));
   solid(colonnade(), columnMaterial(rockTex));
   solid(mergeGeometries(BAY.stacks.map((s, i) => seaStack(s.x, s.z, s.h, s.r, i + 1)))!, columnar);
-  solid(arch(), basalt);
+  solid(arch(), columnar);
   // rock and wreckage out in the sea: more stacks, an arch, the reef she struck, her bow on it
   root.add(buildSeaRocks({ basalt, columnar }));
   // columns: the giant's stair at the headland's corner, and organ pipes along its sea face
@@ -311,6 +311,7 @@ export async function buildBay(source: ModelSource, assets: string): Promise<Bay
     update(time) {
       oceanUniforms.uTime.value = time;
       fallUniforms.uTime.value = time;
+      animateFalls(time);
       birds.update(time);
     },
   };
