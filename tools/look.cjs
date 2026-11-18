@@ -23,6 +23,10 @@ const SCENARIOS = {
   causeway: `g.debug.start(); const a = g.level.landmarks.way0, b = g.level.landmarks.way1; g.debug.teleport(a.x + 3, a.z + 2.5); g.debug.advance(0.3); g.debug.lookAt(b.x, b.y, b.z);`,
   turn2: `g.debug.start(); g.stands[0].phase = 'won'; for (const s of g.stands[0].seals) if (s.collider) { g.world.removeCollider(s.collider); s.collider = null; }
     const a = g.level.landmarks.path33, b = g.level.landmarks.path36; g.debug.teleport(a.x, a.z); g.debug.advance(0.3); g.debug.lookAt(b.x, b.y + 1.5, b.z);`,
+  fight: `g.debug.start(); g.debug.learnAll(); const c = g.stands[0].def.center; g.debug.teleport(c.x - 10, c.z + 4); g.debug.advance(0.5);
+    g.debug.teleport(c.x - 4, c.z + 2); g.debug.advance(6); const e = g.enemies.list.find((x) => x.alive); if (e) g.debug.lookAt(e.position.x, e.position.y + 1.2, e.position.z);`,
+  roadview: `g.debug.start(); const p = g.level.landmarks.path30; const q = g.level.landmarks.path44; g.debug.teleport(p.x, p.z); g.debug.advance(0.3); g.debug.lookAt(q.x, q.y + 1.5, q.z);`,
+  outcrop: `g.debug.start(); const o = g.level.landmarks.outcrop; g.debug.teleport(o.x - 14, o.z + 9); g.debug.advance(0.3); g.debug.lookAt(o.x, o.y - 1, o.z);`,
   cbeach: `g.debug.start(); g.debug.teleport(95, 2); g.debug.advance(0.3); g.debug.lookAt(-150, 20, 70);`,
   croad: `g.debug.start(); g.debug.teleport(128, 6); g.debug.advance(0.3); g.debug.lookAt(150, 30, -40);`,
   stand: `g.debug.start(); g.debug.learnAll(); g.debug.teleport(104, 4); g.debug.advance(0.3); g.debug.lookAt(140, 6, -20);`,
