@@ -46,7 +46,7 @@ export function patchFog() {
   vec3 fogDir = fogRay / max(fogLen, 1e-4);
   // fog lies low: integrate an exponential falloff with height along the ray
   float h0 = max(cameraPosition.y, 0.0), dh = fogRay.y;
-  float k = fogFalloff;
+  float k = max(fogFalloff, 1e-4);
   float layer = abs(dh) > 0.01 ? (exp(-k * h0) - exp(-k * (h0 + dh))) / (k * dh) : exp(-k * h0);
   #ifdef FOG_EXP2
     float fogFactor = 1.0 - exp(- fogDensity * fogDensity * fogLen * fogLen * 0.0 - fogDensity * fogLen * layer);
@@ -65,6 +65,8 @@ export function patchFog() {
     u.fogFalloff = air.falloff;
     u.fogGlowPower = air.glowPower;
   }
+  // and for shader materials that take their fog uniforms from the library
+  Object.assign(THREE.UniformsLib.fog, { fogSunDir: air.sunDir, fogSunColor: air.sunColor, fogFalloff: air.falloff, fogGlowPower: air.glowPower });
 }
 
 /** A material made with onBeforeCompile still needs the fog uniforms handed over. */
@@ -178,13 +180,23 @@ export function stormSky(scene: THREE.Scene, renderer: THREE.WebGLRenderer, opts
   sunAzimuth: number; sunElevation: number; sunColor: THREE.ColorRepresentation; sunIntensity: number;
   envIntensity: number; fog: THREE.ColorRepresentation; fogDensity: number; fogSun: THREE.ColorRepresentation;
   at: THREE.Vector3; area: number; brightness?: number; dark?: number;
-}): { dome: THREE.Mesh; sun: THREE.DirectionalLight } {
+  /**
+   * The dome's colours are painted as they should look on screen. When the picture is tone
+   * mapped and encoded after the scene is drawn (as the game's is), say so here, and the dome
+   * undoes both, so it looks the same. The light it gives the scene is not changed.
+   */
+  postToned?: boolean;
+}): { dome: THREE.Mesh; sun: THREE.DirectionalLight; uniforms: { uDark: THREE.IUniform<number> } } {
   const sunDir = new THREE.Vector3(Math.sin(opts.sunAzimuth) * Math.cos(opts.sunElevation), Math.sin(opts.sunElevation), -Math.cos(opts.sunAzimuth) * Math.cos(opts.sunElevation));
-  const mat = (radius: number) => new THREE.ShaderMaterial({
+  const uniforms = { uSun: { value: sunDir }, uDark: { value: opts.dark ?? 0.55 } };
+  const mat = (radius: number, display = false) => new THREE.ShaderMaterial({
     side: THREE.BackSide, depthWrite: false, fog: false,
-    uniforms: { uSun: { value: sunDir }, uDark: { value: opts.dark ?? 0.55 } },
+    uniforms,
     vertexShader: `varying vec3 vDir; void main(){ vDir = position; vec4 p = projectionMatrix * modelViewMatrix * vec4(position, 1.0); gl_Position = p.xyww; }`,
-    fragmentShader: STORM_FRAG.replace('gl_FragColor = vec4(c, 1.0);', `gl_FragColor = vec4(c * ${(opts.brightness ?? 1).toFixed(3)}, 1.0);`),
+    fragmentShader: STORM_FRAG.replace('gl_FragColor = vec4(c, 1.0);', display
+      // from display colour back to the linear light the tone map will turn into it
+      ? `vec3 lin = pow(clamp(c * ${(opts.brightness ?? 1).toFixed(3)}, 0.0, 1.0), vec3(2.2)); gl_FragColor = vec4(lin * (1.18 - 1.1 * lin), 1.0);`
+      : `gl_FragColor = vec4(c * ${(opts.brightness ?? 1).toFixed(3)}, 1.0);`),
   });
   // light from the sky
   const skyScene = new THREE.Scene();
@@ -194,7 +206,7 @@ export function stormSky(scene: THREE.Scene, renderer: THREE.WebGLRenderer, opts
   pmrem.dispose();
   scene.environmentIntensity = opts.envIntensity;
   scene.background = null;
-  const dome = new THREE.Mesh(new THREE.SphereGeometry(30000, 64, 32), mat(30000));
+  const dome = new THREE.Mesh(new THREE.SphereGeometry(30000, 64, 32), mat(30000, opts.postToned));
   dome.frustumCulled = false;
   dome.renderOrder = -10;
   dome.userData.sky = true;
@@ -213,5 +225,5 @@ export function stormSky(scene: THREE.Scene, renderer: THREE.WebGLRenderer, opts
   sun.shadow.normalBias = 0.05;
   sun.shadow.radius = 6;
   scene.add(sun, sun.target);
-  return { dome, sun };
+  return { dome, sun, uniforms };
 }

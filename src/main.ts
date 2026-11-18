@@ -2,6 +2,8 @@ import './ui/hud.css';
 import { Game } from './game/game';
 import { loadModels } from './art/models';
 import { loadTextures } from './art/materials';
+import { patchFog } from './world/coast/atmosphere';
+import { buildWreckShore } from './world/wreckshore';
 
 const container = document.getElementById('game')!;
 
@@ -13,12 +15,17 @@ container.appendChild(loading);
 const meter = loading.querySelector('i') as HTMLElement;
 
 const assets = import.meta.env.BASE_URL + 'assets/';
+// the fog is patched before any material is made, so every one of them takes it
+patchFog();
+const parts = [0, 0];
+const show = () => { meter.style.width = `${Math.round(((parts[0] + parts[1]) / 2) * 100)}%`; };
 const [models] = await Promise.all([
-  loadModels(assets + 'models/', 8, (done, total) => { meter.style.width = `${Math.round((done / total) * 100)}%`; }),
+  loadModels(assets + 'models/', 8, (done, total) => { parts[0] = done / total; show(); }),
   loadTextures(assets, 8),
 ]);
+const level = await buildWreckShore(assets, (done, total) => { parts[1] = done / total; show(); });
 
-const game = new Game(container, models);
+const game = new Game(container, models, level);
 await game.handsReady;
 loading.remove();
 game.run();

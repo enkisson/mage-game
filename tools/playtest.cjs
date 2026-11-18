@@ -13,7 +13,8 @@ const CHECKS = {
   'reading the first page teaches Fire, and the word can be cast': `
     g.debug.start();
     const before = g.knowledge.sigils.length;
-    g.debug.teleport(4.4, 23.6); g.debug.advance(0.2);
+    const book = g.level.landmarks.book;
+    g.debug.teleport(book.x + 1.4, book.z + 1.1); g.debug.advance(0.2);
     g.input.inject('key', 'KeyE'); g.debug.advance(0.1);
     const reading = g.mode;
     g.input.inject('key', 'KeyE'); g.debug.advance(0.1);
@@ -22,34 +23,19 @@ const CHECKS = {
     return [before === 0 && reading === 'reading' && g.knowledge.sigils.join() === 'fire' && g.knowledge.bound[0] === 'fire'
       && g.knowledge.sentences.join() === 'fire' && g.player.focus < 100, JSON.stringify({ reading, k: g.knowledge, focus: Math.round(g.player.focus) })];`,
 
-  'the gangway leads up onto the ship, and the page on the mainmast teaches Push': `
+  'you can walk from where you wake to the page on the foremast, and it teaches Push': `
     g.debug.start(); g.debug.advance(2);
     const page = g.level.journals.find((j) => j.id === 'shore-2').position;
-    const { gangwayFoot: foot, gangwayTop: top, deck } = g.level.landmarks;
-    // from the sand: up the gangway, over the rail onto the deck, then to the page
-    g.debug.teleport(foot.x, foot.z + 1.5);
-    const sand = g.player.position.y;
-    const walkTo = (p, seconds, hop) => {
-      let t = 0;
-      while (t < seconds && Math.hypot(g.player.position.x - p.x, g.player.position.z - p.z) > 0.7) {
-        g.debug.lookAt(p.x, g.player.position.y + 1.6, p.z);
-        g.input.hold('KeyW', true);
-        g.input.hold('Space', hop && Math.floor(t * 3) % 2 === 0);
-        g.debug.advance(0.1); t += 0.1;
-      }
-      g.input.hold('KeyW', false); g.input.hold('Space', false);
-      return t;
-    };
-    const t1 = walkTo(top, 6, false);
-    const onGangway = g.player.position.y - sand;
-    const t2 = walkTo(deck, 5, true);
-    const t3 = walkTo(page, 6, true);
-    g.debug.advance(0.3);
+    let t = 0;
+    while (t < 20 && Math.hypot(g.player.position.x - page.x, g.player.position.z - page.z) > 1.6) {
+      g.debug.lookAt(page.x, g.player.position.y + 1.6, page.z);
+      g.input.hold('KeyW', true); g.debug.advance(0.1); t += 0.1;
+    }
+    g.input.hold('KeyW', false); g.debug.advance(0.3);
     const near = g.player.position.distanceTo(page) < 2.7;
     g.input.inject('key', 'KeyE'); g.debug.advance(0.1);
-    return [near && g.mode === 'reading' && g.knowledge.sigils.includes('push') && onGangway > 0.8,
-      JSON.stringify({ near, times: [t1, t2, t3].map((n) => +n.toFixed(1)), gangwayRise: +onGangway.toFixed(2), deckAboveSand: +(page.y - sand).toFixed(2), mode: g.mode,
-        at: g.player.position.toArray().map((n) => +n.toFixed(1)), page: page.toArray().map((n) => +n.toFixed(1)), top: top.toArray().map((n) => +n.toFixed(1)), foot: foot.toArray().map((n) => +n.toFixed(1)) })];`,
+    return [near && g.mode === 'reading' && g.knowledge.sigils.includes('push'),
+      JSON.stringify({ near, seconds: +t.toFixed(1), mode: g.mode, at: g.player.position.toArray().map((n) => +n.toFixed(1)), page: page.toArray().map((n) => +n.toFixed(1)) })];`,
 
   'a third word is refused, and Backspace lets a sentence go': `
     g.debug.start(); g.debug.learnAll();
@@ -58,9 +44,10 @@ const CHECKS = {
     g.input.inject('key', 'Backspace'); g.debug.advance(0.1);
     return [held === 2 && g.caster.sentence.length === 0 && g.player.focus === 100, 'held ' + held];`,
 
-  'the stand runs three tides and opens the way north': `
+  'the stand runs three tides and opens the road': `
     g.debug.start(); g.debug.learnAll();
-    g.debug.teleport(0, -58); g.debug.advance(0.5);
+    const c = g.stands[0].def.center;
+    g.debug.teleport(c.x, c.z); g.debug.advance(0.5);
     const st = g.stands[0];
     const sealed = st.seals.every((s) => s.collider !== null);
     let t = 0, casts = 0;
@@ -73,35 +60,83 @@ const CHECKS = {
     return [sealed && st.phase === 'won' && st.seals.every((s) => s.collider === null) && g.knowledge.standsWon === 1,
       JSON.stringify({ phase: st.phase, wave: st.wave, seconds: t, casts, left: g.enemies.alive })];`,
 
+  'the road is barred until the stand is won': `
+    g.debug.start();
+    const a = g.level.landmarks.way1, b = g.level.landmarks.way2;
+    g.debug.teleport(a.x, a.z); g.debug.advance(0.5);
+    let t = 0;
+    while (t < 14 && Math.hypot(g.player.position.x - b.x, g.player.position.z - b.z) > 1.5) {
+      g.debug.lookAt(b.x, g.player.position.y + 1.6, b.z);
+      g.input.hold('KeyW', true); g.debug.advance(0.1); t += 0.1;
+    }
+    g.input.hold('KeyW', false);
+    const got = Math.hypot(g.player.position.x - b.x, g.player.position.z - b.z);
+    return [got > 20, JSON.stringify({ stillToGo: +got.toFixed(1), at: g.player.position.toArray().map((n) => +n.toFixed(1)) })];`,
+
+  'once the stand is won, the road climbs the cliff to the gate': `
+    g.debug.start(); g.debug.learnAll();
+    const st = g.stands[0];
+    st.phase = 'won';
+    for (const s of st.seals) if (s.collider) { g.world.removeCollider(s.collider); s.collider = null; }
+    const L = g.level.landmarks;
+    const ways = Object.keys(L).filter((k) => /^way\\d+$/.test(k)).sort((a, b) => +a.slice(3) - +b.slice(3)).map((k) => L[k]);
+    g.debug.teleport(ways[0].x - 2, ways[0].z + 1); g.debug.advance(0.5);
+    let t = 0, stuck = -1;
+    for (let i = 1; i < ways.length; i++) {
+      const w = ways[i];
+      let leg = 0;
+      while (leg < 30 && Math.hypot(g.player.position.x - w.x, g.player.position.z - w.z) > 1.2) {
+        g.debug.lookAt(w.x, g.player.position.y + 1.6, w.z);
+        g.input.hold('KeyW', true); g.debug.advance(0.1); leg += 0.1;
+      }
+      t += leg;
+      if (leg >= 30) { stuck = i; break; }
+    }
+    const gate = L.gate;
+    let k = 0;
+    while (k < 8 && Math.hypot(g.player.position.x - gate.x, g.player.position.z - gate.z) > 1.5) {
+      g.debug.lookAt(gate.x, g.player.position.y + 1.6, gate.z);
+      g.input.hold('KeyW', true); g.debug.advance(0.1); k += 0.1;
+    }
+    g.input.hold('KeyW', false); g.debug.advance(0.2);
+    const there = g.player.position.distanceTo(gate) < 4;
+    return [stuck < 0 && there && g.player.health === 100 && g.atExit,
+      JSON.stringify({ stuck, seconds: +(t + k).toFixed(1), there, atExit: g.atExit, hp: g.player.health, at: g.player.position.toArray().map((n) => +n.toFixed(1)), gate: gate.toArray().map((n) => +n.toFixed(1)) })];`,
+
   'dying returns you to the shore with what you know': `
     g.debug.start(); g.debug.learnAll(); g.debug.say('fire');
-    g.debug.teleport(0, -66); g.debug.advance(0.5);
+    const c = g.stands[0].def.center;
+    g.debug.teleport(c.x, c.z); g.debug.advance(0.5);
     let t = 0;
-    while (g.mode !== 'dead' && t < 120) { g.debug.advance(0.5); t += 0.5; }
+    while (g.mode !== 'dead' && t < 160) { g.debug.advance(0.5); t += 0.5; }
     const died = g.mode === 'dead';
     g.debug.advance(4);
     const p = g.player.position;
-    return [died && g.mode === 'playing' && g.player.health === 100 && p.z > 20 && g.enemies.list.length === 0 && g.stands[0].phase === 'waiting'
+    const home = p.distanceTo(g.level.spawn.position) < 3;
+    return [died && g.mode === 'playing' && g.player.health === 100 && home && g.enemies.list.length === 0 && g.stands[0].phase === 'waiting'
       && g.knowledge.sigils.length === 4 && g.knowledge.sentences.includes('fire') && g.knowledge.deaths === 1,
-      JSON.stringify({ died, after: t, mode: g.mode, z: +p.z.toFixed(1), deaths: g.knowledge.deaths })];`,
+      JSON.stringify({ died, after: t, mode: g.mode, home, deaths: g.knowledge.deaths })];`,
 
   'the Drowned take the long way round to reach the outcrop': `
     g.debug.start(); g.debug.learnAll();
-    g.debug.teleport(13, -82); g.debug.advance(0.2);
-    const e = g.debug.spawn('drowned', 6, -70);
-    const top = g.player.position.y;
+    g.stands[0].phase = 'won';
+    const top = g.level.landmarks.outcrop, foot = g.level.landmarks.outcropFoot;
+    g.debug.teleport(top.x, top.z); g.debug.advance(0.2);
+    const e = g.debug.spawn('drowned', foot.x, foot.z);
+    const y = g.player.position.y;
     let t = 0, reached = false;
-    while (t < 40 && !reached) { g.debug.advance(0.5); t += 0.5; reached = e.position.y > top - 0.6 && e.position.distanceTo(g.player.position) < 4; }
-    return [reached && t > 5, 'reached after ' + t + ' s (a straight line would take about 4); route ' + g.nav.reachable(6, -70) + ', cost ' + Math.round(g.nav.cost(6, -70))];`,
+    while (t < 50 && !reached) { g.debug.advance(0.5); t += 0.5; reached = e.position.y > y - 0.6 && e.position.distanceTo(g.player.position) < 4; }
+    return [reached && t > 5 && y - foot.y > 4, 'reached after ' + t + ' s (a straight line would take about 3); height ' + (y - foot.y).toFixed(1) + ' m; route ' + g.nav.reachable(foot.x, foot.z) + ', cost ' + Math.round(g.nav.cost(foot.x, foot.z))];`,
 
   'a pillar under your feet lifts you out of reach': `
     g.debug.start(); g.debug.learnAll();
     g.stands[0].phase = 'won'; // no tide; just one creature
-    g.debug.teleport(8, -64); g.player.pitch = -1.3; g.debug.advance(0.2);
+    const o = g.level.landmarks.open;
+    g.debug.teleport(o.x, o.z); g.player.pitch = -1.3; g.debug.advance(0.2);
     const y0 = g.player.position.y;
     g.debug.say('stone', 'stone'); g.debug.advance(1.0);
     const rise = g.player.position.y - y0;
-    g.debug.spawn('drowned', 3, -66);
+    g.debug.spawn('drowned', o.x - 5, o.z - 2);
     g.debug.advance(9);
     const safe = g.player.health;
     g.debug.advance(8); // the pillar crumbles after 14 s
@@ -110,9 +145,10 @@ const CHECKS = {
   'the low ledge is not safe: the Drowned leap up to it': `
     g.debug.start(); g.debug.learnAll();
     g.stands[0].phase = 'won';
-    g.debug.teleport(-13.5, -72); g.debug.advance(0.2);
+    const L = g.level.landmarks;
+    g.debug.teleport(L.ledge.x, L.ledge.z); g.debug.advance(0.2);
     const ledge = g.player.position.y;
-    const e = g.debug.spawn('drowned', -9.5, -71);
+    const e = g.debug.spawn('drowned', L.ledgeFoot.x, L.ledgeFoot.z);
     const below = ledge - e.position.y;
     let t = 0, up = false;
     while (t < 20 && !up) { g.debug.advance(0.25); t += 0.25; up = e.position.y > ledge - 0.4; }
@@ -121,8 +157,9 @@ const CHECKS = {
   'a Gale throws a creature off the outcrop and the fall hurts it': `
     g.debug.start(); g.debug.learnAll();
     g.stands[0].phase = 'won';
-    g.debug.teleport(13, -82); g.debug.advance(0.2);
-    const e = g.debug.spawn('drowned', 13, -79.5);
+    const top = g.level.landmarks.outcrop;
+    g.debug.teleport(top.x - 1.2, top.z); g.debug.advance(0.2);
+    const e = g.debug.spawn('drowned', top.x + 1.3, top.z);
     g.debug.advance(1.3);
     const y0 = e.position.y;
     g.debug.lookAt(e.position.x, e.position.y + 1, e.position.z);
@@ -132,7 +169,8 @@ const CHECKS = {
   'an updraft carries you up and sets you down unharmed, but still hurts what it throws': `
     g.debug.start(); g.debug.learnAll();
     g.stands[0].phase = 'won';
-    g.debug.teleport(13, -82); g.debug.advance(2);
+    const top = g.level.landmarks.outcrop, o = g.level.landmarks.open;
+    g.debug.teleport(top.x, top.z); g.debug.advance(2);
     // off the outcrop on an updraft: a 5 m outcrop plus the lift is a fall that would otherwise hurt
     const y0 = g.player.position.y;
     g.player.pitch = -1.3; g.debug.say('wind', 'wind');
@@ -143,11 +181,11 @@ const CHECKS = {
     const dropped = y0 - g.player.position.y;
     const hp = g.player.health;
     // a plain fall from the same height does hurt
-    g.debug.teleport(13, -82); g.player.position.y += 9; g.debug.advance(3);
+    g.debug.teleport(top.x, top.z); g.player.position.y += 9; g.debug.advance(3);
     const plain = g.player.health;
     // and a creature thrown up by one is hurt when it lands
-    g.debug.teleport(0, -60);
-    const e = g.debug.spawn('drowned', 0, -68); g.debug.advance(1.3);
+    g.debug.teleport(o.x, o.z);
+    const e = g.debug.spawn('drowned', o.x, o.z - 8); g.debug.advance(1.3);
     e.apply({ stagger: 2 }); // hold it still, so the test is about the fall and not the aim
     g.debug.lookAt(e.position.x, e.position.y, e.position.z); g.debug.say('wind', 'wind'); g.debug.advance(4);
     return [peak - y0 > 2.5 && hp === 100 && plain < 100 && e.hp < 80,
@@ -161,8 +199,9 @@ const CHECKS = {
   'spitters hurt you from range': `
     g.debug.start(); g.debug.learnAll();
     g.stands[0].phase = 'won';
-    g.debug.teleport(0, -62); g.debug.advance(0.2);
-    g.debug.spawn('spitter', 0, -76);
+    const o = g.level.landmarks.open;
+    g.debug.teleport(o.x, o.z); g.debug.advance(0.2);
+    g.debug.spawn('spitter', o.x, o.z - 14);
     g.debug.advance(9);
     return [g.player.health < 100, 'health ' + Math.round(g.player.health)];`,
 };
@@ -189,7 +228,7 @@ server.listen(0, async () => {
     page.on('pageerror', (e) => errors.push(e.message));
     await page.addInitScript(() => { try { localStorage.clear(); } catch {} });
     await page.goto(`http://127.0.0.1:${port}/`);
-    await page.waitForFunction('window.gloam !== undefined', null, { timeout: 60000 });
+    await page.waitForFunction('window.gloam !== undefined', null, { timeout: 600000 });
     let ok = false, detail = '';
     try {
       [ok, detail] = await page.evaluate(`(() => { const g = window.gloam; ${body} })()`);

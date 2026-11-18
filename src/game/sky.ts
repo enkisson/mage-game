@@ -14,6 +14,10 @@ export interface NightSky {
   setNight(n: number): void;
   /** Shadow detail: the full-size map, or a quarter of it for slower machines. */
   setShadowSize(size: number): void;
+  /** How far back toward the light the shadow camera stands (default 90 m). */
+  shadowDistance?: number;
+  /** If set, the shadow map covers the whole level from here and never follows the player. */
+  shadowCentre?: THREE.Vector3;
 }
 
 export interface SkyOptions {

@@ -128,6 +128,18 @@ const SHOTS: Record<string, Shot> = {
 
 async function shot(name: string): Promise<string> {
   const scene = await bayReady();
+  // "<shot>-raw": the render as it comes, without the paintover
+  if (name.endsWith('-raw') || name.endsWith('-nofog')) {
+    const s = SHOTS[name.replace(/-(raw|nofog)$/, '')];
+    if (name.endsWith('-nofog')) (scene.fog as THREE.FogExp2).density = 0.00001;
+    const cam = new THREE.PerspectiveCamera(s.fov, W / H, 0.1, 40000);
+    cam.position.set(s.pos[0], s.pos[1] + Math.max(0, groundHeight(s.pos[0], s.pos[2])), s.pos[2]);
+    cam.lookAt(new THREE.Vector3(...s.look));
+    renderer.toneMappingExposure = s.exposure;
+    bay!.update(3.0);
+    renderer.render(scene, cam);
+    return renderer.domElement.toDataURL('image/jpeg', 0.92);
+  }
   if (name === 'plan') {
     const cam = new THREE.OrthographicCamera(-260, 260, 146, -146, 1, 2000);
     cam.position.set(-50, 800, 20);

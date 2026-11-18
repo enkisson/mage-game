@@ -1,6 +1,7 @@
 // What a biome hands to the game: something to draw, something to collide with, and where
 // the story and the fights happen.
 import type * as THREE from 'three';
+import type { NightSky } from '../game/sky';
 import type { SigilId } from '../magic/sigils';
 
 export type EnemyKind = 'drowned' | 'spitter';
@@ -59,6 +60,14 @@ export interface Level {
   waterLevel: number;
   /** Named places worth pointing at: for hints, and for the automated playtest. */
   landmarks: Record<string, THREE.Vector3>;
+  /** The level's own sky and light, if it has one; otherwise the game paints a night sky. */
+  sky?: (scene: THREE.Scene, renderer: THREE.WebGLRenderer) => NightSky;
+  /** How far on the player is, 0 at the start to 1 at the end: night falls as it rises. */
+  progress?: (p: THREE.Vector3) => number;
+  /** Where the way on lies once the stand is won, and what it says when you reach it. */
+  exit?: { at: THREE.Vector3; prompt: string };
+  /** The finish on the picture: contrast round the middle, colour, a darkened edge, and how much glow. */
+  grade?: { contrast: number; saturation: number; vignette: number; bloom: [number, number]; exposure: [number, number] };
   /** Called every frame for things like water and flames. */
   /** `eye` is where the player is looking from, for anything that depends on how near they are. */
   update?: (time: number, dt: number, eye?: THREE.Vector3) => void;

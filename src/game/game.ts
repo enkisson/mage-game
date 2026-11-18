@@ -9,7 +9,6 @@ import { Input, SIGIL_KEYS } from '../core/input';
 import { World } from '../world/world';
 import { NavGrid } from '../world/nav';
 import type { Level, JournalDef, StandDef, SpawnGroup } from '../world/level';
-import { buildShore } from '../world/shore';
 import { journalProp, sealProp, type JournalProp, type SealProp } from '../world/props';
 import { Player } from '../player/player';
 import { View } from '../player/view';
@@ -31,6 +30,27 @@ import type { Models } from '../art/models';
 import { emptyKnowledge, learnSigil, loadKnowledge, saveKnowledge, type Knowledge } from './save';
 import { GESTURES, HOLD, IDLE, type GestureName } from '../player/poses';
 import type { ArmPose } from '../player/hands';
+
+/** A grade in display space: an S-curve for contrast, saturation, and a darkened edge. */
+const GRADE_SHADER = {
+  uniforms: { tDiffuse: { value: null }, uContrast: { value: 1 }, uSaturation: { value: 1 }, uVignette: { value: 0 } },
+  vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+  fragmentShader: `
+    uniform sampler2D tDiffuse; uniform float uContrast, uSaturation, uVignette; varying vec2 vUv;
+    vec3 curve(vec3 v) {
+      vec3 lo = 0.5 * pow(2.0 * v, vec3(uContrast)), hi = 1.0 - 0.5 * pow(2.0 * (1.0 - v), vec3(uContrast));
+      return mix(lo, hi, step(0.5, v));
+    }
+    void main() {
+      vec4 t = texture2D(tDiffuse, vUv);
+      vec3 c = curve(clamp(t.rgb, 0.0, 1.0));
+      float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+      c = mix(vec3(l), c, uSaturation);
+      vec2 r = (vUv - 0.5) * vec2(1.6, 1.0);
+      c *= 1.0 - uVignette * pow(length(r) * 0.85, 1.4);
+      gl_FragColor = vec4(c, t.a);
+    }`,
+};
 
 type Mode = 'title' | 'playing' | 'paused' | 'reading' | 'book' | 'dead';
 
@@ -109,12 +129,13 @@ export class Game {
   /** Every effect on, or the lighter set for slower machines. */
   private effects: 'full' | 'light' = 'full';
   private exitSpot: THREE.Vector3;
+  private grade: ShaderPass;
   /** When true the loop idles and tests drive the game step by step. */
   private manual = false;
   /** Resolves once the hand models are in. */
   handsReady: Promise<boolean> = Promise.resolve(false);
 
-  constructor(private container: HTMLElement, models: Models) {
+  constructor(private container: HTMLElement, models: Models, level: Level) {
     this.renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1));
     this.renderer.shadowMap.enabled = true;
@@ -135,11 +156,12 @@ export class Game {
     this.fx = new Effects(scene);
 
     // the level
-    this.level = buildShore(models);
+    void models;
+    this.level = level;
     scene.add(this.level.root);
     this.world.waterLevel = this.level.waterLevel;
     this.world.addCollider(this.level.collision);
-    this.sky = createSky(scene, {
+    this.sky = this.level.sky?.(scene, this.renderer) ?? createSky(scene, {
       top: 0x060a1a, mid: 0x15233f, horizon: 0x40506b, glow: 0xd97a3a, glowDir: [-0.75, 0, 0.66],
       fog: 0x18212f, fogDensity: 0.0075,
       keyColor: 0xb9cbff, keyIntensity: 1.25, keyDir: [0.55, 0.55, 0.3], ambient: 0.7,
@@ -169,7 +191,7 @@ export class Game {
       this.stands.push({ def, phase: 'waiting', wave: 0, clock: 0, queue: [], seals, tide: 0 });
     }
     const exit = this.level.stands[0].seals.find((s) => s.role === 'exit')!;
-    this.exitSpot = exit.at.clone();
+    this.exitSpot = (this.level.exit?.at ?? exit.at).clone();
     this.resetStands();
 
     // post
@@ -182,6 +204,16 @@ export class Game {
     this.bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.55, 0.6, 1.0);
     this.composer.addPass(this.bloom);
     this.composer.addPass(new OutputPass());
+    // the level's grade, in display space after the tone map, as the concept pictures were finished
+    this.grade = new ShaderPass(GRADE_SHADER);
+    const gr = this.level.grade;
+    this.grade.enabled = !!gr;
+    if (gr) {
+      this.grade.uniforms.uContrast.value = gr.contrast;
+      this.grade.uniforms.uSaturation.value = gr.saturation;
+      this.grade.uniforms.uVignette.value = gr.vignette;
+    }
+    this.composer.addPass(this.grade);
     // edges are smoothed in one cheap pass over the finished picture
     this.fxaa = new ShaderPass(FXAAShader);
     this.composer.addPass(this.fxaa);
@@ -218,7 +250,7 @@ export class Game {
     try { light = localStorage.getItem('gloamtide.effects') === 'light'; } catch { /* private window */ }
     if (light) this.setEffects('light');
     else this.setRung(this.rung);
-    void loadPhotoSky(scene, this.renderer, this.sky, { url: assets + 'sky/night.jpg', rotation: 2.2, backgroundIntensity: 0.26, lightIntensity: 0.5, fog: 0x211f2b });
+    if (!this.level.sky) void loadPhotoSky(scene, this.renderer, this.sky, { url: assets + 'sky/night.jpg', rotation: 2.2, backgroundIntensity: 0.26, lightIntensity: 0.5, fog: 0x211f2b });
   }
 
   /** The HUD keys and the marks on the hands both show which sigils are bound. */
@@ -589,7 +621,7 @@ export class Game {
 
     // Night comes on as you leave the wreck behind, and in any case with time.
     if (!this.nightHeld) {
-      const north = THREE.MathUtils.clamp((16 - this.player.position.z) / 58, 0, 1);
+      const north = this.level.progress ? this.level.progress(this.player.position) : THREE.MathUtils.clamp((16 - this.player.position.z) / 58, 0, 1);
       this.night = Math.min(1, Math.max(this.night + dt / 420, north));
     }
 
@@ -639,7 +671,7 @@ export class Game {
     this.atExit = st.phase === 'won' && this.player.position.distanceTo(this.exitSpot) < 5;
     if (!playing) this.hud.setPrompt('');
     else if (near) this.hud.setPrompt(`<kbd>E</kbd> ${this.knowledge.journals.includes(near.id) ? 'Read the page again' : 'Read the journal'}`);
-    else if (this.atExit) this.hud.setPrompt('<kbd>E</kbd> The Salt Marsh is not built yet. Call the tide again, stronger');
+    else if (this.atExit) this.hud.setPrompt(`<kbd>E</kbd> ${this.level.exit?.prompt ?? 'The Salt Marsh is not built yet. Call the tide again, stronger'}`);
     else this.hud.setPrompt('');
 
     if (this.mode === 'dead') {
@@ -699,22 +731,26 @@ export class Game {
     if (this.renderer.domElement.style.filter !== blur) this.renderer.domElement.style.filter = blur;
     this.sky.setNight(this.night);
     seaUniforms.uNight.value = this.night;
-    this.renderer.toneMappingExposure = THREE.MathUtils.lerp(1.05, 1.2, this.night);
-    this.bloom.strength = THREE.MathUtils.lerp(0.55, 0.75, this.night);
+    const exposure = this.level.grade?.exposure ?? [1.05, 1.2];
+    this.renderer.toneMappingExposure = THREE.MathUtils.lerp(exposure[0], exposure[1], this.night);
+    const bloom = this.level.grade?.bloom ?? [0.55, 0.75];
+    this.bloom.strength = THREE.MathUtils.lerp(bloom[0], bloom[1], this.night);
     this.sky.update(cam);
     // Shadows are redrawn every other frame; the light only moves when they are, so the
     // shadows on screen always match the map they were drawn from.
     if (this.manual || this.frameCount++ % 2 === 0) {
       this.renderer.shadowMap.needsUpdate = true;
-      // keep the shadow map centred on the player, moving it in whole texels so shadows do not crawl
-      const p = this.player.position, dir = this.sky.keyDir;
+      // keep the shadow map centred on the player, moving it in whole texels so shadows do not
+      // crawl (or, for a level small enough, fixed over the whole of it)
+      const p = this.sky.shadowCentre ?? this.player.position, dir = this.sky.keyDir;
       const right = _right.crossVectors(_up, dir).normalize();
       const upL = _upL.crossVectors(dir, right);
-      const texel = 92 / 4096;
+      const sc = this.sky.key.shadow.camera as THREE.OrthographicCamera;
+      const texel = (sc.right - sc.left) / this.sky.key.shadow.mapSize.x;
       const sx = Math.round(p.dot(right) / texel) * texel, sy = Math.round(p.dot(upL) / texel) * texel;
       const centre = _centre.set(0, 0, 0).addScaledVector(right, sx).addScaledVector(upL, sy).addScaledVector(dir, p.dot(dir));
       this.sky.key.target.position.copy(centre);
-      this.sky.key.position.copy(centre).addScaledVector(dir, 90);
+      this.sky.key.position.copy(centre).addScaledVector(dir, this.sky.shadowDistance ?? 90);
     }
     this.hud.update(dt, this.player.health, this.player.focus);
     this.composer.render();

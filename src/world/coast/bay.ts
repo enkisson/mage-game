@@ -4,7 +4,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { BAY, FALLS, OUTLINE, RIVERS, greenness, groundHeight, plateauAt, rockDistance, shoreAt } from './layout';
-import { buildGround, loadTextureSet } from './terrain';
+import { buildGround, loadTextureSet, type TextureSet } from './terrain';
 import { buildOcean, oceanUniforms } from './ocean';
 import { place, tatter, weather, buildPeak, buildTower, buildVortex, summitOf, type ModelSource } from './dressing';
 import { mistBank, glow, beam } from './airfx';
@@ -24,6 +24,12 @@ export interface Bay {
   root: THREE.Group;
   marks: Record<string, THREE.Vector3>;
   update(time: number): void;
+  /** Everything you can stand on or bump into (the ground is left to the level, which crops it). */
+  solids: THREE.Object3D[];
+  /** The rock textures, for anything the level adds. */
+  rockTex: TextureSet;
+  /** Rock materials, for anything the level adds. */
+  columnar: THREE.Material;
 }
 
 const hash = (a: number, b: number) => { const s = Math.sin(a * 127.1 + b * 311.7) * 43758.5453; return s - Math.floor(s); };
@@ -54,7 +60,8 @@ export async function buildBay(source: ModelSource, assets: string): Promise<Bay
   // ---- rock -------------------------------------------------------------------------------
   const basalt = rockMaterial(rockTex, { columnar: 0 });
   const columnar = rockMaterial(rockTex, { columnar: 1, moss: 0.8 });
-  const solid = (geo: THREE.BufferGeometry, m: THREE.Material) => { const mesh = new THREE.Mesh(geo, m); mesh.castShadow = mesh.receiveShadow = true; root.add(mesh); return mesh; };
+  const solids: THREE.Object3D[] = [];
+  const solid = (geo: THREE.BufferGeometry, m: THREE.Material) => { const mesh = new THREE.Mesh(geo, m); mesh.castShadow = mesh.receiveShadow = true; root.add(mesh); solids.push(mesh); return mesh; };
   // the cliffs: a mass of basalt columns, with the arch and the caves built of them too
   solid(columnField(), columnFieldMaterial(rockTex));
   solid(mergeGeometries(BAY.stacks.map((s, i) => seaStack(s.x, s.z, s.h, s.r, i + 1)))!, columnar);
@@ -67,6 +74,7 @@ export async function buildBay(source: ModelSource, assets: string): Promise<Bay
   {
     const ruins = buildRuins({ rock: rockTex });
     root.add(ruins.group);
+    solids.push(ruins.group);
     marks.gate = ruins.marks.gate;
     marks.exit = ruins.marks.exit;
   }
@@ -103,6 +111,8 @@ export async function buildBay(source: ModelSource, assets: string): Promise<Bay
   });
   weather(ship, 0x8a8078, 0.15);
   root.add(ship);
+  // only her hull is solid: rigging and sails are for looking at
+  ship.traverse((o) => { if (o.name.includes('hull')) solids.push(o); });
   ship.updateMatrixWorld(true);
   marks.ship = ship.position.clone();
   const stern = new THREE.Vector3(14.5, 9.5, 0).applyMatrix4(ship.matrixWorld);
@@ -134,6 +144,7 @@ export async function buildBay(source: ModelSource, assets: string): Promise<Bay
     boat.position.set(-30, groundHeight(-30, 22) - 0.2, 22);
     boat.castShadow = boat.receiveShadow = true;
     root.add(boat);
+    solids.push(boat);
     // the keel and a few ribs showing through the hole in her
     for (let k = 0; k < 7; k++) {
       const rib = new THREE.Mesh(new THREE.TorusGeometry(1.15, 0.05, 6, 20, Math.PI), wood);
@@ -216,6 +227,7 @@ export async function buildBay(source: ModelSource, assets: string): Promise<Bay
   {
     const head = put('gothic_statue', { x: 30, z: -18, yaw: 2.4, tilt: [0.5, 0.3], scale: 3.2, sink: 1.4 }, 0x707070);
     marks.statue = head.position.clone();
+    solids.push(head);
   }
 
   // ---- water: the falls, and the streams they feed ------------------------------------------------
@@ -273,7 +285,9 @@ export async function buildBay(source: ModelSource, assets: string): Promise<Bay
 
   // ---- the dead mage, sitting against a rock with his journal open in his lap -----------------
   const mx = 3.2, mz = 2.6;
-  root.add(new THREE.Mesh(boulders([{ x: mx - 0.6, z: mz - 1.2, r: 1.2 }], 31), basalt));
+  const seat = new THREE.Mesh(boulders([{ x: mx - 0.6, z: mz - 1.2, r: 1.2 }], 31), basalt);
+  root.add(seat);
+  solids.push(seat);
   const mage = makeSeatedMage();
   mage.group.position.set(mx, groundHeight(mx, mz) - 0.04, mz);
   mage.group.rotation.set(-0.12, 0.35, 0);
@@ -316,7 +330,7 @@ export async function buildBay(source: ModelSource, assets: string): Promise<Bay
   root.add(mistBank(new THREE.Vector3(16, 30, -105), 34, 30, 0xb8bec4, 0.35, 8, 91));
 
   return {
-    root, marks,
+    root, marks, solids, rockTex, columnar,
     update(time) {
       oceanUniforms.uTime.value = time;
       fallUniforms.uTime.value = time;

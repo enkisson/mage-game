@@ -12,6 +12,16 @@ const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/cs
 const SCENARIOS = {
   title: `g.debug.render()`,
   wake: `g.debug.start(); g.debug.advance(0.5);`,
+  // the concept frames' cameras, for comparing the game with them
+  cwaking: `g.debug.start(); g.debug.teleport(10, 12); g.debug.advance(0.3); g.debug.lookAt(-160, 22, 130);`,
+  cwakinglight: `g.debug.start(); g.setEffects('light', false); g.debug.teleport(10, 12); g.debug.advance(0.3); g.debug.lookAt(-160, 22, 130);`,
+  cnoao: `g.debug.start(); g.grounding.enabled = false; g.debug.teleport(10, 12); g.debug.advance(0.3); g.debug.lookAt(-160, 22, 130);`,
+  cnobloom: `g.debug.start(); g.bloom.enabled = false; g.debug.teleport(10, 12); g.debug.advance(0.3); g.debug.lookAt(-160, 22, 130);`,
+  cnofog: `g.debug.start(); g.sky.setNight = () => {}; g.world.scene.fog.density = 0.00001; g.debug.teleport(10, 12); g.debug.advance(0.3); g.debug.lookAt(-160, 22, 130);`,
+  cbeach: `g.debug.start(); g.debug.teleport(95, 2); g.debug.advance(0.3); g.debug.lookAt(-150, 20, 70);`,
+  croad: `g.debug.start(); g.debug.teleport(128, 6); g.debug.advance(0.3); g.debug.lookAt(150, 30, -40);`,
+  stand: `g.debug.start(); g.debug.learnAll(); g.debug.teleport(104, 4); g.debug.advance(0.3); g.debug.lookAt(140, 6, -20);`,
+  gate: `g.debug.start(); const p = g.level.landmarks.roadTop; g.debug.teleport(p.x - 8, p.z - 3); g.debug.advance(0.3); const q = g.level.landmarks.gate; g.debug.lookAt(q.x, q.y + 3, q.z);`,
   body: `g.debug.start(); g.debug.teleport(5.6, 24.6, 0.55, -0.62); g.debug.advance(0.3);`,
   stern: `g.debug.start(); g.debug.teleport(12, 12, 1.1, 0.25); g.debug.advance(0.3);`,
   lee: `g.debug.start(); g.debug.teleport(6, -3.5, 2.2, -0.12); g.debug.advance(0.3);`,
@@ -104,7 +114,7 @@ server.listen(0, async () => {
     page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
     await page.addInitScript(() => { try { localStorage.clear(); } catch {} });
     await page.goto(`http://127.0.0.1:${port}/`);
-    await page.waitForFunction('window.gloam !== undefined', null, { timeout: 60000 }).catch(() => errors.push('game never started'));
+    await page.waitForFunction('window.gloam !== undefined', null, { timeout: 600000 }).catch(() => errors.push('game never started'));
     await page.waitForTimeout(2500); // textures and sky
     await page.evaluate('window.gloam.handsReady').catch(() => {});
     const t = Date.now();
