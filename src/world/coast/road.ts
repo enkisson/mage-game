@@ -61,6 +61,9 @@ export const ROAD: { pieces: RoadPiece[]; path: RoadPoint[]; start: THREE.Vector
   const last = LEGS[LEGS.length - 1], endP = at(last.s1, last.d);
   const endY = plateauAt(endP.x, endP.z) + 0.2;
   const raw: { kind: 'leg' | 'turn'; sd: [number, number][] }[] = [];
+  // the approach: a causeway of broken columns climbing from the open beach at the bay's east
+  // end, over the cliff's last stumps, to where the first leg starts (about one in three)
+  const A = { x: 195, z: -2 };
   LEGS.forEach((l, k) => {
     const sd: [number, number][] = [];
     const n = Math.ceil(Math.abs(l.s1 - l.s0));
@@ -76,6 +79,7 @@ export const ROAD: { pieces: RoadPiece[]; path: RoadPoint[]; start: THREE.Vector
     }
   });
   // the length of each piece, for the climb
+  const beachY = groundHeight(A.x, A.z) + 0.2;
   const lengths = raw.map((p) => p.sd.reduce((acc, v, i) => (i ? acc + Math.hypot(v[0] - p.sd[i - 1][0], v[1] - p.sd[i - 1][1]) : 0), 0));
   const total = lengths.reduce((a, b) => a + b, 0);
   let run = 0;
@@ -93,6 +97,16 @@ export const ROAD: { pieces: RoadPiece[]; path: RoadPoint[]; start: THREE.Vector
     run += lengths[pi];
     return { kind: p.kind, pts };
   });
+  {
+    const b = at(LEGS[0].s0, LEGS[0].d), N = 30, pts: RoadPoint[] = [];
+    for (let i = 0; i <= N; i++) {
+      const t = i / N;
+      // eased into the leg at the top, so the turn onto it is smooth
+      const u = t < 0.8 ? t / 0.8 * 0.85 : 0.85 + (t - 0.8) / 0.2 * 0.15;
+      pts.push({ x: A.x + (b.x - A.x) * u, z: A.z + (b.z - A.z) * u, y: beachY + (startY - beachY) * t, nx: b.nx, nz: b.nz });
+    }
+    pieces.unshift({ kind: 'turn', pts });
+  }
   const path = pieces.flatMap((p, i) => (i ? p.pts.slice(1) : p.pts));
   const e = path[path.length - 1], e1 = path[path.length - 4];
   return {

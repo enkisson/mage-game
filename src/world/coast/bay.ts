@@ -12,6 +12,7 @@ import { marram } from './grass';
 import { boulders, rockMaterial, scatterNear, seaStack } from './cliffs';
 import { fallRecess } from './cliffface';
 import { columnField, columnFieldMaterial } from './columnfield';
+import { ROAD, masonryMaterial, roadDeck, roadParapet } from './road';
 import { animateFalls, fallUniforms, waterfall } from './falls';
 import { buildBirds } from './birds';
 import { buildSeaRocks } from './searocks';
@@ -56,6 +57,11 @@ export async function buildBay(source: ModelSource, assets: string): Promise<Bay
   // the cliffs: a mass of basalt columns, with the arch and the caves built of them too
   solid(columnField(), columnFieldMaterial(rockTex));
   solid(mergeGeometries(BAY.stacks.map((s, i) => seaStack(s.x, s.z, s.h, s.r, i + 1)))!, columnar);
+  // the road out: up the east end of the north wall to the clifftop, where the next level begins
+  solid(roadDeck(), masonryMaterial(rockTex, true));
+  solid(roadParapet(), masonryMaterial(rockTex, false));
+  marks.roadStart = ROAD.start.clone();
+  marks.roadEnd = ROAD.end.clone();
   // rock and wreckage out in the sea: more stacks, an arch, the reef she struck, her bow on it
   root.add(buildSeaRocks({ basalt, columnar }));
   // boulders: along the river, in the canyon, on the scree, and black and wet at the headland's foot

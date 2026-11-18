@@ -127,6 +127,15 @@ export function buildOcean(ground: Ground, opts: { level?: number; deep?: number
             }
             return d2 - d1;
           }
+          // irregular lace: domain-warped, stretched along the crests, softly thresholded, and
+          // dissolved to its mean with distance so it never aliases into a fine crackle
+          float olace(vec2 p, vec2 sc, float soft, float fade, float seed) {
+            vec2 w = vec2(on(p * 0.55 + seed), on(p * 0.55 + seed + 6.1)) - 0.5;
+            w += (vec2(on(p * 1.9 + seed * 2.0), on(p * 1.9 + seed * 2.0 + 3.7)) - 0.5) * 0.5;
+            float v = ovor(p * sc + w * 2.2 + seed);
+            float l = 1.0 - smoothstep(0.0, soft, v);
+            return mix(l, 0.38, fade);
+          }
           float ofbm(vec2 p) { return on(p) * 0.5 + on(p * 2.1 + 3.1) * 0.27 + on(p * 4.3 + 7.7) * 0.15 + on(p * 8.7 + 1.3) * 0.08; }`)
         .replace('#include <map_fragment>', `
           vec2 p = vOPos.xz;
@@ -153,24 +162,32 @@ export function buildOcean(ground: Ground, opts: { level?: number; deep?: number
           // wave that decays seaward into a trailing band of lace, with dark troughs between
           float wob = (ofbm(vec2(p.x * 0.035, p.y * 0.012)) - 0.5) * 1.6 + (on(p * 0.18) - 0.5) * 0.25;
           float q = fract(oDepth / 5.5 + uTime * 0.075 + wob);
-          float band = (1.0 - smoothstep(0.0, 0.62, q)) * smoothstep(1.0, 0.965, q);
+          // the leading edge frays: its position wanders with mid-frequency noise, and the whole
+          // band thins into holes and wisps instead of ending on a clean contour
+          float edgeN = ofbm(p * vec2(0.33, 0.55) + vec2(uTime * 0.05, 0.0));
+          float rag = ofbm(p * vec2(0.5, 0.95) + vec2(7.0, -uTime * 0.12) + churn);
+          float qn = q + (edgeN - 0.5) * 0.12;
+          float band = smoothstep(-0.02 - 0.08 * rag, 0.12 + 0.1 * rag, qn) * (1.0 - smoothstep(0.0, 0.8, q)) * smoothstep(1.0, 0.9, q);
+          band *= mix(0.35, 1.25, smoothstep(0.25, 0.75, rag));
+          float vd = length(vOPos - cameraPosition);
+          float lfade = smoothstep(35.0, 130.0, vd);
           float zone = smoothstep(11.0, 5.0, oDepth) * smoothstep(0.35, 1.6, oDepth);
-          float web = 1.0 - smoothstep(0.0, 0.3, ovor(p * vec2(0.5, 0.9) + churn * 0.8));
-          float web2 = 1.0 - smoothstep(0.0, 0.22, ovor(p * vec2(1.2, 2.0) + 9.0 - vec2(0.0, uTime * 0.2)));
+          float web = olace(p + churn * 1.6, vec2(0.3, 0.8), 0.55, lfade, 1.0);
+          float web2 = olace(p - vec2(0.0, uTime * 0.2), vec2(0.8, 2.1), 0.5, lfade, 9.0);
           float body0 = band * zone;
-          float breaking = smoothstep(0.42, 0.62, body0 * (0.55 + 0.6 * lace) + web * body0 * 0.45 + web2 * body0 * 0.2 - 0.12);
+          float breaking = smoothstep(0.12, 0.78, body0 * (0.5 + 0.5 * lace) + web * body0 * 0.4 + web2 * body0 * 0.2 - 0.12);
           // whitewater tumbling in over the last metres: only a thin web, lots of holes
           float inner = smoothstep(2.6, 0.9, oDepth) * smoothstep(0.35, 0.9, oDepth) * band;
-          float surf = inner * smoothstep(0.5, 0.75, web * 0.7 + web2 * 0.4 + lace * 0.3 - 0.2) * 0.8;
+          float surf = inner * smoothstep(0.35, 0.85, web * 0.7 + web2 * 0.4 + lace * 0.3 - 0.2) * 0.8;
           // foam round the cliffs and the stacks, thrown up where the water meets rock
-          float atRock = smoothstep(-12.0, 0.0, rock) * smoothstep(0.55, 0.78, churn + smoothstep(-4.0, 0.0, rock) * 0.35) * smoothstep(0.3, 0.5, lace);
+          float atRock = smoothstep(-12.0, 0.0, rock) * smoothstep(0.5, 0.85, churn + smoothstep(-4.0, 0.0, rock) * 0.35) * smoothstep(0.25, 0.6, lace);
           // old foam left on the surface in long streaks, pulled by the wind
-          float streaks = smoothstep(0.6, 0.8, ofbm(p * vec2(0.05, 0.22) + vec2(ofbm(p * 0.02) * 2.0, 0.0))) * 0.55 * (1.0 - smoothstep(30.0, 90.0, oDepth));
+          float streaks = smoothstep(0.56, 0.86, ofbm(p * vec2(0.05, 0.22) + vec2(ofbm(p * 0.02) * 2.0, 0.0))) * 0.55 * (1.0 - smoothstep(30.0, 90.0, oDepth));
           // the last of a wave sliding up the sand: a bright lacy lip at the leading edge only,
           // dark glassy water behind it
           float lip = smoothstep(0.0, 0.03, oDepth) * smoothstep(0.2, 0.05, oDepth);
-          float swash = lip * smoothstep(0.25, 0.55, web * 0.6 + web2 * 0.5 + lace * 0.35 - 0.1);
-          float trail = smoothstep(0.7, 0.25, oDepth) * smoothstep(0.2, 0.4, oDepth) * smoothstep(0.62, 0.8, web2 * 0.6 + lace * 0.5) * 0.45;
+          float swash = lip * smoothstep(0.2, 0.7, web * 0.6 + web2 * 0.5 + lace * 0.35 - 0.1);
+          float trail = smoothstep(0.7, 0.25, oDepth) * smoothstep(0.2, 0.4, oDepth) * smoothstep(0.5, 0.88, web2 * 0.6 + lace * 0.5) * 0.45;
           oFoam = clamp(max(max(breaking, surf), max(max(atRock, swash), trail)) + streaks, 0.0, 1.0);
           // body: dark slate out in the bay, turbid grey-green where the sand is stirred up
           vec3 body = mix(diffuseColor.rgb, uShallow * 0.55, smoothstep(16.0, 2.0, oDepth));

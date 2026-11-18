@@ -13,7 +13,8 @@
 //  - the stumps: at the foot, columns broken off a few metres up, stepping down onto the sand and
 //    out into the surf.
 //
-// The wall comes forward and steps back massif by massif along the shore. Where a fall comes over the edge a slot is cut
+// The wall comes forward and steps back massif by massif along the shore. In a few places the
+// columns curve together in a great sweep (the swirls). Up the east end a road is cut into them. Where a fall comes over the edge a slot is cut
 // in the mass, and under the arch and in the sea caves the columns hang from the rock above.
 import * as THREE from 'three';
 import { distToSegment, fbm, smoothstep } from '../../core/math';
@@ -21,6 +22,7 @@ import { fogUniforms } from './atmosphere';
 import type { TextureSet } from './terrain';
 import { BAY, FALLS, OUTLINE, RIVERS, groundHeight, landDistance, plateauAt } from './layout';
 import { fallRecess } from './cliffface';
+import { roadAt } from './road';
 
 const hash = (a: number, b: number) => { const s = Math.sin(a * 127.1 + b * 311.7) * 43758.5453; return s - Math.floor(s); };
 
@@ -90,8 +92,7 @@ const MASSIFS: Massif[] = (() => {
       face: canyon ? 1 + hash(k, 3) * 2.5 : seaward ? 2 + hash(k, 3) * 6 : 3 + hash(k, 3) * 11,
       terrace: canyon ? (r < 0.5 ? 0 : 0.15 + hash(k, 4) * 0.2) : r < 0.2 ? 0 : 0.28 + hash(k, 4) * 0.4,
       talus: canyon ? 1.5 + hash(k, 5) * 2 : 3 + hash(k, 5) * 9,
-      // bowed bundles: off for now, since at this column size the bent columns shear apart and
-      // show their ends from below
+      // the old per-column bow, replaced by the swirls below
       bow: 0,
       lean: (hash(k, 8) - 0.5) * 0.07,
     });
@@ -140,13 +141,14 @@ function sites(): Site[] {
   const key = (i: number, j: number) => i * 100003 + j;
   const A = BAY.arch, archHalf = BAY.canyon.width / 2 + 3;
   const r = rng(1234);
-  const minX = -290, maxX = 185, minZ = -135, maxZ = 62;
+  const minX = -290, maxX = 200, minZ = -135, maxZ = 62;
   for (let n = 0; n < 420000; n++) {
     const x = minX + r() * (maxX - minX), z = minZ + r() * (maxZ - minZ);
     const d = landDistance(x, z);
     const inArch = Math.abs(x - A.x) < archHalf && Math.abs(z - A.z) < A.thickness * 0.6 + 1;
-    if (!inArch && (d < -15 || d > 48)) continue;
-    const sp = spacing(x, z, inArch ? 5 : d) * (inArch && d < 2 ? 0.5 : 1);
+    const nearRoad = roadAt(x, z).near;
+    if (!inArch && !nearRoad && (d < -15 || d > 48)) continue;
+    const sp = spacing(x, z, inArch ? 5 : d) * (inArch && d < 2 ? 0.5 : 1) * (nearRoad ? 0.42 : 1);
     const ci = Math.floor(x / cell), cj = Math.floor(z / cell);
     let ok = true;
     for (let i = ci - 3; i <= ci + 3 && ok; i++) for (let j = cj - 3; j <= cj + 3 && ok; j++) {
@@ -208,6 +210,47 @@ function cellOf(p: Site & { nb?: number[] }, all: Site[]): [number, number][] {
   });
 }
 
+// ---- the swirls -------------------------------------------------------------------------------------
+
+/**
+ * Where the columns curve. In a few places a flow cooled round a hollow and its columns grew in a
+ * great curve: up from the beach straight, then sweeping out over the beach and fanning apart,
+ * then back in to the rim. The bend is one smooth field over space, applied to every corner of
+ * every column, so neighbours bend together and stay packed edge to edge.
+ */
+interface Swirl { x: number; z: number; nx: number; nz: number; tx: number; tz: number; r: number; out: number; fan: number; twist: number; ylo: number; yhi: number }
+const SWIRLS: Swirl[] = ([
+  [-17, -55, 15, 8, 0.7, 4],
+  [-66, -51, 20, 10, -0.8, -5],
+  [62, -50, 21, 10, 0.75, 4.5],
+  [-168, 43, 24, 11, -0.8, 5],
+  [-232, 49, 19, 9, 0.7, -4],
+] as const).map(([x, z, r, out, fan, twist]) => {
+  const f = nearestFoot(x, z);
+  const land = plateauAt(f.fx - f.nx * 12, f.fz - f.nz * 12), g = Math.max(0, groundHeight(f.fx + f.nx * 4, f.fz + f.nz * 4));
+  return { x: f.fx - f.nx * 9, z: f.fz - f.nz * 9, nx: f.nx, nz: f.nz, tx: -f.nz, tz: f.nx, r, out, fan, twist, ylo: g + (land - g) * 0.22, yhi: land + 4 };
+});
+
+/** How far the swirls move a point, and how strongly any swirl touches it. */
+function swirlAt(x: number, z: number, y: number): [number, number, number] {
+  let dx = 0, dz = 0, wmax = 0;
+  for (const w of SWIRLS) {
+    const ox = x - w.x, oz = z - w.z;
+    const k = Math.exp(-(ox * ox + oz * oz) / (w.r * w.r));
+    if (k < 0.01) continue;
+    wmax = Math.max(wmax, k);
+    const t = Math.min(1, Math.max(0, (y - w.ylo) / (w.yhi - w.ylo)));
+    const rise = Math.pow(Math.sin(Math.PI * t), 1.2);
+    // out over the beach; fanning apart along the wall; and a sideways sweep that turns over
+    const along = (ox * w.tx + oz * w.tz) / w.r;
+    const o = w.out * k * rise;
+    const side = (w.fan * along * w.r * 0.25 * rise + w.twist * Math.sin(Math.PI * 2 * t) * 0.5) * k;
+    dx += w.nx * o + w.tx * side;
+    dz += w.nz * o + w.tz * side;
+  }
+  return [dx, dz, wmax];
+}
+
 // ---- the geometry ---------------------------------------------------------------------------------
 
 /**
@@ -226,16 +269,19 @@ export function columnField(): THREE.BufferGeometry {
    * One prism from `y0` to `y1` over the polygon, bent sideways by `bend(y)`. Its top is broken
    * at a slant; a hanging one has an underside.
    */
-  const prism = (poly: [number, number][], y0: number, y1: number, bend: (y: number) => [number, number], meta: { land: number; contact: number; ox: number; oz: number; canyon: number; bow: number; under: boolean; top: boolean }) => {
+  const prism = (poly: [number, number][], y0: number, y1: number, bend: (y: number) => [number, number], meta: { land: number; contact: number; ox: number; oz: number; canyon: number; bow: number; under: boolean; top: boolean; flat?: boolean }) => {
     id++;
     let cx = 0, cz = 0;
     for (const v of poly) { cx += v[0]; cz += v[1]; }
     cx /= poly.length; cz /= poly.length;
-    const sx = (hash(id, 7) - 0.5) * 0.3, sz = (hash(id, 8) - 0.5) * 0.3;
+    const sx = meta.flat ? 0 : (hash(id, 7) - 0.5) * 0.3, sz = meta.flat ? 0 : (hash(id, 8) - 0.5) * 0.3;
     const ty = (x: number, z: number) => y1 + (x - cx) * sx + (z - cz) * sz;
-    const segs = meta.bow > 0 ? Math.max(2, Math.ceil((y1 - y0) / 3)) : 1;
+    // a column in a swirl is cut into short lengths, so it can curve
+    const curving = swirlAt(cx, cz, (y0 + y1) / 2)[2] > 0.03;
+    const segs = curving ? Math.max(2, Math.ceil((y1 - y0) / 2.2)) : 1;
     const n = poly.length;
     const push = (x: number, y: number, z: number, um: number, fw: number, kind: number) => {
+      if (curving) { const [wx, wz] = swirlAt(x, z, y); x += wx; z += wz; }
       P.push(x, y, z); A.push(id, um, fw, kind); B.push(y0, y1, meta.land, meta.contact); C.push(meta.ox, meta.oz, meta.canyon, meta.bow);
     };
     for (let i = 0; i < n; i++) {
@@ -276,6 +322,13 @@ export function columnField(): THREE.BufferGeometry {
     const gOut = groundHeight(ft.fx + ft.nx * 4, ft.fz + ft.nz * 4);
     const g = groundHeight(x, z);
     const r1 = hash(x * 3.1, z * 2.7), r2 = hash(z * 1.9, x * 4.3), r3 = hash(x + z, x - z);
+
+    // the road: columns cut off flush under its paving, or built up to it
+    const road = roadAt(x, z);
+    if (road.bed !== null) {
+      prism(poly, Math.min(g, gOut) - 3, road.bed - 0.25, () => [0, 0], { land, contact: -1e3, ox: ft.nx, oz: ft.nz, canyon, bow: 0, under: false, top: true, flat: true });
+      continue;
+    }
 
     // the arch: columns hanging from the rock that spans the canyon's mouth
     if (site.arch) {
@@ -323,7 +376,6 @@ export function columnField(): THREE.BufferGeometry {
     let y0 = base0, y1: number, bow = 0, contact = -1e3;
     if (d >= face) {
       y1 = wall;
-      bow = m.bow * smoothstep(0.6, 0.9, (wall - gOut) / Math.max(1, land - gOut)) * Math.exp(-Math.pow((d - face) / 7, 2)) * Math.sin(Math.PI * Math.min(1, Math.max(0, (ft.s - m.s0) / (m.s1 - m.s0)))) * (1 - nearFall);
     } else {
       // keep the beach clear where it is needed: the streams, the wreck
       if (d < 0 && (riverDistance(x, z) < 3 || Math.hypot(x - shipX, z - shipZ) < 24)) continue;
@@ -339,6 +391,8 @@ export function columnField(): THREE.BufferGeometry {
       }
       y0 = Math.min(g, gEff) - 2.5;
     }
+    // open air over the road, and the wall behind the leg below it
+    y1 = Math.min(y1, road.cap);
     if (cave > 0) {
       if (d < face) { y1 = Math.min(y1, Math.max(g, -0.6) + 1.5); }
       else y0 = Math.max(g, 0) + cave;

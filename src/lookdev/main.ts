@@ -113,6 +113,12 @@ const SHOTS: Record<string, Shot> = {
   sea: { pos: [-30, 1.6, 32], look: [-140, 10, 150], fov: 55, exposure: 1.0 },
   // from the water, the way the painting sees it: the headland and the long wall over the bay
   hero: { pos: [40, 13, 112], look: [-75, 30, -30], fov: 55, exposure: 1.0 },
+  // the road up the cliff, from the beach
+  road: { pos: [128, 2.0, 6], look: [150, 30, -40], fov: 62, exposure: 1.0 },
+  // on the road, looking up the second leg
+  roadup: { pos: [161.93, 15.45, -25.34], look: [128.78, 24.63, -39.51], fov: 62, exposure: 1.0 },
+  // a bundle of columns sweeping out over the beach
+  swirl: { pos: [-46, 1.8, -12], look: [-66, 34, -55], fov: 60, exposure: 1.0 },
   fallfoot: { pos: [-27, 1.7, -24], look: [-38, 12, -50], fov: 55, exposure: 1.0 },
 };
 
