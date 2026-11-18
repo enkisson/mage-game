@@ -39,7 +39,7 @@ function foot(s: number): { x: number; z: number; nx: number; nz: number } {
 /** A point of the road: where, how high its paving is, and which way its sea edge faces. */
 export interface RoadPoint { x: number; z: number; y: number; nx: number; nz: number }
 /** One piece of the road: a leg along the cliff, or a turn cut back into it. */
-export interface RoadPiece { kind: 'leg' | 'turn'; pts: RoadPoint[] }
+export interface RoadPiece { kind: 'leg' | 'turn' | 'apron'; pts: RoadPoint[] }
 
 /** Half the road's width, and the parapet's width on its sea edge. */
 export const ROAD_HALF = 2.4;
@@ -107,13 +107,21 @@ export const ROAD: { pieces: RoadPiece[]; path: RoadPoint[]; start: THREE.Vector
     }
     pieces.unshift({ kind: 'turn', pts });
   }
+  const top = pieces[pieces.length - 1].pts;
+  const e = top[top.length - 1], e1 = top[top.length - 4];
+  const ed = new THREE.Vector3(e.x - e1.x, 0, e.z - e1.z).normalize();
+  // the apron: the paving carried on level from the top of the road into the gatehouse
+  {
+    const pts: RoadPoint[] = [];
+    for (let i = 0; i <= 8; i++) pts.push({ x: e.x + ed.x * i, z: e.z + ed.z * i, y: e.y, nx: e.nx, nz: e.nz });
+    pieces.push({ kind: 'apron', pts });
+  }
   const path = pieces.flatMap((p, i) => (i ? p.pts.slice(1) : p.pts));
-  const e = path[path.length - 1], e1 = path[path.length - 4];
   return {
     pieces, path,
     start: new THREE.Vector3(path[0].x, path[0].y, path[0].z),
     end: new THREE.Vector3(e.x, e.y, e.z),
-    endDir: new THREE.Vector3(e.x - e1.x, 0, e.z - e1.z).normalize(),
+    endDir: ed,
   };
 })();
 
@@ -153,7 +161,7 @@ export function roadAt(x: number, z: number): { bed: number | null; cap: number;
     const inSpan = bt >= -0.02 && bt <= 1.02;
     const half = ROAD_HALF + PARAPET;
     if (best < half + 3.5) out.near = true;
-    if (piece.kind === 'turn') {
+    if (piece.kind !== 'leg') {
       if (best < half + 0.4) out.bed = Math.max(out.bed ?? -Infinity, by);
       continue;
     }

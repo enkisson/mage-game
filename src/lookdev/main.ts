@@ -119,6 +119,10 @@ const SHOTS: Record<string, Shot> = {
   roadup: { pos: [161.93, 15.45, -25.34], look: [128.78, 24.63, -39.51], fov: 62, exposure: 1.0 },
   // a bundle of columns sweeping out over the beach
   swirl: { pos: [-46, 1.8, -12], look: [-66, 34, -55], fov: 60, exposure: 1.0 },
+  // from the sea off the bay's east end: the road climbing to the gate, the keep above
+  fortress: { pos: [175, 22, 135], look: [140, 62, -60], fov: 55, exposure: 1.0 },
+  // at the top of the road, at the gate
+  gate: { pos: [146, 61.5, -58.5], look: [162, 64, -50], fov: 62, exposure: 1.0 },
   fallfoot: { pos: [-27, 1.7, -24], look: [-38, 12, -50], fov: 55, exposure: 1.0 },
 };
 

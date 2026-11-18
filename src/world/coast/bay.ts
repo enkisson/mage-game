@@ -17,6 +17,7 @@ import { animateFalls, fallUniforms, waterfall } from './falls';
 import { buildBirds } from './birds';
 import { buildSeaRocks } from './searocks';
 import { buildCrash } from './crash';
+import { buildRuins } from './ruins';
 import { makeSeatedMage } from '../../art/mage';
 
 export interface Bay {
@@ -62,6 +63,13 @@ export async function buildBay(source: ModelSource, assets: string): Promise<Bay
   solid(roadParapet(), masonryMaterial(rockTex, false));
   marks.roadStart = ROAD.start.clone();
   marks.roadEnd = ROAD.end.clone();
+  // at the top, the ruined gatehouse, the walls along the rim, and the keep: the way to the next level
+  {
+    const ruins = buildRuins({ rock: rockTex });
+    root.add(ruins.group);
+    marks.gate = ruins.marks.gate;
+    marks.exit = ruins.marks.exit;
+  }
   // rock and wreckage out in the sea: more stacks, an arch, the reef she struck, her bow on it
   root.add(buildSeaRocks({ basalt, columnar }));
   // boulders: along the river, in the canyon, on the scree, and black and wet at the headland's foot
