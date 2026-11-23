@@ -230,7 +230,7 @@ console.log('placement.json written');
   const inArch = (x: number, z: number) => Math.abs(x - BAY.arch.x) < BAY.canyon.width / 2 + 2 && Math.abs(z - BAY.arch.z) < 10;
   const clad: object[] = [], foot: object[] = [], tops: object[] = [], drift: object[] = [];
   let k = 0;
-  for (let s = 0; s < seg[seg.length - 1]; s += 12 + hash(k, 1) * 6, k++) {
+  for (let s = 0; s < seg[seg.length - 1]; s += 7 + hash(k, 1) * 3, k++) {
     const p = at(s), smooth = [at(s - 6), at(s + 6)];
     const nx = (smooth[0].nx + smooth[1].nx + p.nx), nz = (smooth[0].nz + smooth[1].nz + p.nz), nl = Math.hypot(nx, nz);
     const ox = nx / nl, oz = nz / nl;
