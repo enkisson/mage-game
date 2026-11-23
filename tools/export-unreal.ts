@@ -130,6 +130,28 @@ const LAND = { x0: -320, z0: -180, size: 540, n: 1009 };
 
 // ---- solids -----------------------------------------------------------------------------------------
 
+// the ground as a model too, every 0.75 m over the same square, for Nanite (the heightmap above is
+// for a Landscape, if one is wanted later)
+{
+  const { x0, z0, size } = LAND, n = Math.round(size / 0.75) + 1, step = size / (n - 1);
+  const pos = new Float32Array(n * n * 3);
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+    const x = x0 + i * step, z = z0 + j * step, k = (j * n + i) * 3;
+    pos[k] = x; pos[k + 1] = groundHeight(x, z); pos[k + 2] = z;
+  }
+  const idx = new Uint32Array((n - 1) * (n - 1) * 6);
+  let q = 0;
+  for (let j = 0; j < n - 1; j++) for (let i = 0; i < n - 1; i++) {
+    const a = j * n + i, b = a + 1, c = a + n, d = c + 1;
+    idx[q++] = a; idx[q++] = c; idx[q++] = b; idx[q++] = b; idx[q++] = c; idx[q++] = d;
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setIndex(new THREE.BufferAttribute(idx, 1));
+  g.computeVertexNormals();
+  writeGlb('terrain.glb', [{ name: 'Terrain', geo: g }]);
+}
+
 writeGlb('cliffs.glb', [{ name: 'ColumnCliffs', geo: columnField() }]);
 writeGlb('stacks.glb', [{ name: 'SeaStacksNear', geo: mergeGeometries(BAY.stacks.map((s, i) => seaStack(s.x, s.z, s.h, s.r, i + 1)))! }]);
 {
