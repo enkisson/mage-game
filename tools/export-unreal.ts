@@ -212,3 +212,50 @@ const placement = {
 };
 fs.writeFileSync(path.join(out, 'placement.json'), JSON.stringify(placement, null, 1));
 console.log('placement.json written');
+
+// ---- dressing: where the scanned rock goes --------------------------------------------------------
+// Cladding: every ~14 m along the cliff foot, a slab of scanned cliff facing the open ground, as tall
+// as the wall there. Skipped at the falls (their slots stay open), the road, and the canyon's arch.
+{
+  const hash = (a: number, b: number) => { const s = Math.sin(a * 127.1 + b * 311.7) * 43758.5453; return s - Math.floor(s); };
+  const seg = [0];
+  for (let i = 1; i < OUTLINE.length; i++) seg.push(seg[i - 1] + Math.hypot(OUTLINE[i][0] - OUTLINE[i - 1][0], OUTLINE[i][1] - OUTLINE[i - 1][1]));
+  const at = (s: number) => {
+    let i = 0; while (i < seg.length - 2 && seg[i + 1] <= s) i++;
+    const a = OUTLINE[i], b = OUTLINE[i + 1], l = seg[i + 1] - seg[i] || 1, t = (s - seg[i]) / l;
+    return { x: a[0] + (b[0] - a[0]) * t, z: a[1] + (b[1] - a[1]) * t, nx: -(b[1] - a[1]) / l, nz: (b[0] - a[0]) / l };
+  };
+  const nearFall = (x: number, z: number) => FALLS.some((f) => Math.hypot(x - f.x, z - f.z) < f.width * 0.7 + 4);
+  const nearRoad = (x: number, z: number) => ROAD.path.some((p) => Math.hypot(x - p.x, z - p.z) < 9);
+  const inArch = (x: number, z: number) => Math.abs(x - BAY.arch.x) < BAY.canyon.width / 2 + 2 && Math.abs(z - BAY.arch.z) < 10;
+  const clad: object[] = [], foot: object[] = [], tops: object[] = [], drift: object[] = [];
+  let k = 0;
+  for (let s = 0; s < seg[seg.length - 1]; s += 12 + hash(k, 1) * 6, k++) {
+    const p = at(s), smooth = [at(s - 6), at(s + 6)];
+    const nx = (smooth[0].nx + smooth[1].nx + p.nx), nz = (smooth[0].nz + smooth[1].nz + p.nz), nl = Math.hypot(nx, nz);
+    const ox = nx / nl, oz = nz / nl;
+    const g = groundHeight(p.x + ox * 4, p.z + oz * 4), top = plateauAt(p.x - ox * 8, p.z - oz * 8);
+    if (nearFall(p.x, p.z) || nearRoad(p.x, p.z) || inArch(p.x, p.z) || top - g < 6) continue;
+    const yaw = Math.atan2(oz, ox) * 180 / Math.PI;   // Unreal yaw of the outward direction (X = web x, Y = web z)
+    // a slab sits a little proud of the column wall, its foot buried in the scree
+    clad.push({ at: ue(p.x + ox * 1.5, g - 3, p.z + oz * 1.5), yaw, heightM: top - g + 5, widthM: 16 + hash(k, 2) * 8, pick: Math.floor(hash(k, 3) * 5), flip: hash(k, 4) < 0.5 });
+    // rubble at its foot, and a ledge or two
+    for (let r = 0; r < 3; r++) {
+      const a = (hash(k, 10 + r) - 0.5) * 12, out = 2 + hash(k, 20 + r) * 7;
+      const x = p.x + ox * out - oz * a, z = p.z + oz * out + ox * a;
+      if (nearRoad(x, z) || nearFall(x, z) || groundHeight(x, z) < 0.3) continue;
+      foot.push({ at: ue(x, groundHeight(x, z) - 0.3, z), yaw: hash(k, 30 + r) * 360, scale: 0.8 + hash(k, 40 + r) * 1.6, pick: Math.floor(hash(k, 50 + r) * 6) });
+    }
+    // moss on the rim
+    const tx = p.x - ox * (4 + hash(k, 60) * 10), tz = p.z - oz * (4 + hash(k, 61) * 10);
+    tops.push({ at: ue(tx, plateauAt(tx, tz) - 0.1, tz), yaw: hash(k, 62) * 360, scale: 1 + hash(k, 63) * 2, pick: Math.floor(hash(k, 64) * 14) });
+  }
+  // driftwood and logs along the tideline
+  for (let i = 0; i < 40; i++) {
+    const x = -90 + hash(i, 70) * 260, z = shoreAt(x) - 6 - hash(i, 71) * 8;
+    if (groundHeight(x, z) < 0.2) continue;
+    drift.push({ at: ue(x, groundHeight(x, z) - 0.05, z), yaw: hash(i, 72) * 360, scale: 0.8 + hash(i, 73) * 0.8, pick: Math.floor(hash(i, 74) * 5) });
+  }
+  fs.writeFileSync(path.join(out, 'dressing.json'), JSON.stringify({ clad, foot, tops, drift }, null, 0));
+  console.log('dressing.json', clad.length, 'cliff slabs,', foot.length, 'foot rocks,', tops.length, 'moss,', drift.length, 'driftwood');
+}
