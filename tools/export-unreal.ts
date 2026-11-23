@@ -259,3 +259,57 @@ console.log('placement.json written');
   fs.writeFileSync(path.join(out, 'dressing.json'), JSON.stringify({ clad, foot, tops, drift }, null, 0));
   console.log('dressing.json', clad.length, 'cliff slabs,', foot.length, 'foot rocks,', tops.length, 'moss,', drift.length, 'driftwood');
 }
+
+// ---- talus: the bank of black sand and scree piled against the cliff foot -------------------------
+// A strip along the foot: from 16 m out on the beach (flush with the ground) up the rock to 3 m in,
+// 4-7 m above the beach, a little lumpy. Lower where a stream or a fall's pool runs out.
+{
+  const hash = (a: number, b: number) => { const s = Math.sin(a * 127.1 + b * 311.7) * 43758.5453; return s - Math.floor(s); };
+  const seg = [0];
+  for (let i = 1; i < OUTLINE.length; i++) seg.push(seg[i - 1] + Math.hypot(OUTLINE[i][0] - OUTLINE[i - 1][0], OUTLINE[i][1] - OUTLINE[i - 1][1]));
+  const at = (s: number) => {
+    let i = 0; while (i < seg.length - 2 && seg[i + 1] <= s) i++;
+    const a = OUTLINE[i], b = OUTLINE[i + 1], l = seg[i + 1] - seg[i] || 1, t = (s - seg[i]) / l;
+    return { x: a[0] + (b[0] - a[0]) * t, z: a[1] + (b[1] - a[1]) * t };
+  };
+  const water = (x: number, z: number) => {
+    let d = 1e9;
+    for (const r of RIVERS) for (const [rx, rz] of r) d = Math.min(d, Math.hypot(x - rx, z - rz));
+    for (const f of FALLS) d = Math.min(d, Math.hypot(x - f.pool[0], z - f.pool[1]) - f.width * 0.6);
+    return d;
+  };
+  const near = (x: number, z: number) => ROAD.path.some((p) => Math.hypot(x - p.x, z - p.z) < 6);
+  const ACROSS = [-16, -12, -9, -6.5, -4.5, -3, -1.5, 0, 1.5, 3];
+  const step = 1.5, L = seg[seg.length - 1], rows = Math.floor(L / step) + 1;
+  const pos: number[] = [], idx: number[] = [];
+  for (let r = 0; r < rows; r++) {
+    const s = r * step, p = at(s), a = at(Math.max(0, s - 4)), b = at(Math.min(L, s + 4));
+    let tx = b.x - a.x, tz = b.z - a.z; const tl = Math.hypot(tx, tz) || 1; tx /= tl; tz /= tl;
+    const ox = -tz, oz = tx; // out to the open ground
+    const g0 = groundHeight(p.x + ox * 5, p.z + oz * 5);
+    const wet = Math.min(1, Math.max(0, (water(p.x, p.z) - 3) / 10));
+    const peak = (4 + hash(Math.floor(s / 9), 1) * 3 + Math.sin(s * 0.21) * 0.8) * (0.25 + 0.75 * wet);
+    for (const d of ACROSS) {
+      const x = p.x - ox * d, z = p.z - oz * d;
+      const base = groundHeight(x, z) > g0 + 3 ? g0 : groundHeight(x, z); // under the rock, use the beach
+      const t = Math.min(1, Math.max(0, (d + 16) / 19));                     // 0 out on the beach, 1 at the rock
+      let h = base + peak * Math.pow(t, 1.7) - 0.15 + (hash(Math.round(x * 2), Math.round(z * 2)) - 0.5) * 0.25 * t;
+      if (near(x, z)) h = Math.min(h, base - 0.3);
+      pos.push(x, h, z);
+    }
+  }
+  const n = ACROSS.length;
+  for (let r = 0; r < rows - 1; r++) for (let k = 0; k < n - 1; k++) {
+    const a = r * n + k, b = a + 1, c = a + n, d = c + 1;
+    idx.push(a, c, b, b, c, d);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  // wound so the top faces up: flip if the first triangle faces down
+  const nrm = g.attributes.normal;
+  let up = 0; for (let i = 0; i < nrm.count; i++) up += nrm.getY(i);
+  if (up < 0) { for (let i = 0; i < idx.length; i += 3) { const t = idx[i + 1]; idx[i + 1] = idx[i + 2]; idx[i + 2] = t; } g.setIndex(idx); g.computeVertexNormals(); }
+  writeGlb('talus.glb', [{ name: 'Talus', geo: g }]);
+}
